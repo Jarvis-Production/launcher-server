@@ -52,34 +52,20 @@ app.post('/api/client/download-and-encrypt', async (req, res) => {
         const { url } = req.body;
         if (!url) return res.status(400).json({ error: 'URL required' });
         
-        // Get or generate encryption key
-        if (!ENCRYPTION_KEY) {
-            const keyRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get('encryption_key');
-            if (keyRow && keyRow.value) {
-                ENCRYPTION_KEY = keyRow.value;
-                process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
-                console.log('[Crypto] Loaded encryption key from DB');
-            } else {
-                ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
-                await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('encryption_key', ENCRYPTION_KEY);
-                process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
-                console.log('[Crypto] Generated and stored new encryption key');
-            }
+        // Use the fixed key directly - ignore DB
+        const encKey = Buffer.from(ENCRYPTION_KEY, 'hex');
+        console.log(`[Client] Enc key buffer length: ${encKey.length}`);
+        if (encKey.length !== 32) {
+            return res.status(500).json({ error: 'Invalid encryption key length', got: encKey.length });
         }
         
         console.log(`[Client] Downloading from: ${url}`);
-        console.log(`[Client] Encryption key hex length: ${ENCRYPTION_KEY.length}`);
         
         // Download JAR from GitHub
         const jarData = await downloadFile(url);
         console.log(`[Client] Downloaded ${jarData.length} bytes`);
         
         // Encrypt with AES-256-CBC
-        const encKey = Buffer.from(ENCRYPTION_KEY, 'hex');
-        console.log(`[Client] Enc key buffer length: ${encKey.length}`);
-        if (encKey.length !== 32) {
-            return res.status(500).json({ error: 'Invalid encryption key length', got: encKey.length });
-        }
         const iv = crypto.randomBytes(16);
         const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
         const encrypted = Buffer.concat([cipher.update(jarData), cipher.final()]);
