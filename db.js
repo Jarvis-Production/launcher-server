@@ -26,28 +26,30 @@ const db = {
     prepare(sql) {
         return {
             get(...args) {
+                const flatArgs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
                 if (client.prepare) {
-                    // Local SQLite (better-sqlite3)
-                    return client.prepare(sql).get(...args);
+                    return client.prepare(sql).get(...flatArgs);
                 } else {
-                    // Turso
-                    const result = client.executeSync({ sql, args: args.length === 1 && Array.isArray(args[0]) ? args[0] : args });
+                    const result = client.executeSync({ sql, args: flatArgs });
                     return result.rows[0] || null;
                 }
             },
             all(...args) {
+                const flatArgs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
                 if (client.prepare) {
-                    return client.prepare(sql).all(...args);
+                    return client.prepare(sql).all(...flatArgs);
                 } else {
-                    const result = client.executeSync({ sql, args: args.length === 1 && Array.isArray(args[0]) ? args[0] : args });
+                    const result = client.executeSync({ sql, args: flatArgs });
                     return result.rows;
                 }
             },
             run(...args) {
+                const flatArgs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
                 if (client.prepare) {
-                    return client.prepare(sql).run(...args);
+                    return client.prepare(sql).run(...flatArgs);
                 } else {
-                    return client.executeSync({ sql, args: args.length === 1 && Array.isArray(args[0]) ? args[0] : args });
+                    const result = client.executeSync({ sql, args: flatArgs });
+                    return { changes: result.rowsAffected || 0 };
                 }
             }
         };
@@ -56,7 +58,6 @@ const db = {
         if (client.exec) {
             client.exec(sql);
         } else {
-            // Turso: split by semicolons and execute each
             sql.split(';').filter(s => s.trim()).forEach(s => {
                 try { client.executeSync(s.trim()); } catch (e) {}
             });
