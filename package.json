@@ -8,8 +8,9 @@
     "dev": "node server.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.0.0",
+    "@libsql/client": "^0.17.4",
     "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.0.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
