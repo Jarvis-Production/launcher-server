@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Jartix — Admin Panel</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #0c0e14; color: #e4e8f0; }
+        .login { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .login-box {
+            background: #151a25; border: 1px solid #1e2436; border-radius: 12px;
+            padding: 40px; width: 360px;
+        }
+        .login-box h2 { font-size: 20px; margin-bottom: 24px; text-align: center; }
+        input {
+            width: 100%; padding: 10px 14px; background: #0c0e14; border: 1px solid #1e2436;
+            border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 12px; outline: none;
+        }
+        input:focus { border-color: #4a8eff; }
+        button {
+            width: 100%; padding: 10px; background: #4a8eff; color: #fff; border: none;
+            border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s;
+        }
+        button:hover { background: #5c9cff; }
+        .error { color: #f87171; font-size: 13px; margin-bottom: 12px; text-align: center; display: none; }
+
+        .panel { display: none; }
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 16px 24px; border-bottom: 1px solid #1e2436; background: #111520;
+        }
+        .header h1 { font-size: 18px; }
+        .header button { width: auto; padding: 6px 16px; font-size: 12px; background: #1e2436; }
+        .header button:hover { background: #2a3040; }
+
+        .stats {
+            display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+            padding: 20px 24px;
+        }
+        .stat-card {
+            background: #151a25; border: 1px solid #1e2436; border-radius: 10px;
+            padding: 16px; text-align: center;
+        }
+        .stat-card .num { font-size: 28px; font-weight: 700; color: #4a8eff; }
+        .stat-card .label { font-size: 11px; color: #5c6580; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+
+        .content { padding: 0 24px 24px; }
+        .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+        .tab {
+            padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500;
+            background: transparent; color: #5c6580; border: none; cursor: pointer; transition: all 0.2s;
+        }
+        .tab.active { background: #1e2436; color: #e4e8f0; }
+        .tab:hover { color: #e4e8f0; }
+
+        .section { display: none; }
+        .section.active { display: block; }
+
+        .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+        .toolbar input { width: auto; margin-bottom: 0; }
+        .toolbar select { padding: 8px 12px; background: #0c0e14; border: 1px solid #1e2436; border-radius: 8px; color: #fff; font-size: 13px; }
+        .toolbar button { width: auto; padding: 8px 16px; font-size: 13px; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td {
+            padding: 10px 12px; text-align: left; font-size: 13px;
+            border-bottom: 1px solid #1e2436;
+        }
+        th { color: #5c6580; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px; }
+        td { color: #9aa3b8; }
+        tr:hover td { background: rgba(74, 142, 255, 0.03); }
+
+        .badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: 11px; font-weight: 600;
+        }
+        .badge-green { background: rgba(52, 211, 153, 0.1); color: #34d399; }
+        .badge-red { background: rgba(248, 113, 113, 0.1); color: #f87171; }
+        .badge-blue { background: rgba(74, 142, 255, 0.1); color: #4a8eff; }
+
+        .action-btn {
+            padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 600;
+            border: none; cursor: pointer; transition: all 0.2s;
+        }
+        .action-btn.danger { background: rgba(248, 113, 113, 0.1); color: #f87171; }
+        .action-btn.danger:hover { background: rgba(248, 113, 113, 0.2); }
+        .action-btn.warn { background: rgba(251, 191, 36, 0.1); color: #fbbf24; }
+        .action-btn.warn:hover { background: rgba(251, 191, 36, 0.2); }
+
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+            z-index: 200; align-items: center; justify-content: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: #151a25; border: 1px solid #1e2436; border-radius: 12px;
+            padding: 24px; width: 400px;
+        }
+        .modal h3 { margin-bottom: 16px; }
+        .modal .close { float: right; background: none; color: #5c6580; font-size: 18px; padding: 0; width: auto; }
+        .modal .close:hover { color: #fff; }
+        .key-list {
+            background: #0c0e14; border: 1px solid #1e2436; border-radius: 8px;
+            padding: 12px; max-height: 200px; overflow-y: auto; font-family: monospace;
+            font-size: 13px; color: #4a8eff; line-height: 1.8; margin-top: 12px;
+        }
+
+        @media (max-width: 768px) {
+            .stats { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Login -->
+<div class="login" id="loginView">
+    <div class="login-box">
+        <h2>Jartix Admin</h2>
+        <div class="error" id="loginError"></div>
+        <input type="text" id="loginUser" placeholder="Username" value="admin">
+        <input type="password" id="loginPass" placeholder="Password" value="admin123">
+        <button onclick="doLogin()">Войти</button>
+    </div>
+</div>
+
+<!-- Panel -->
+<div class="panel" id="panelView">
+    <div class="header">
+        <h1>Jartix Admin Panel</h1>
+        <button onclick="doLogout()">Выйти</button>
+    </div>
+
+    <div class="stats" id="statsGrid">
+        <div class="stat-card"><div class="num" id="statUsers">-</div><div class="label">Пользователей</div></div>
+        <div class="stat-card"><div class="num" id="statKeys">-</div><div class="label">Всего ключей</div></div>
+        <div class="stat-card"><div class="num" id="statActive">-</div><div class="label">Активных ключей</div></div>
+        <div class="stat-card"><div class="num" id="statSessions">-</div><div class="label">Онлайн</div></div>
+        <div class="stat-card"><div class="num" id="statResets">-</div><div class="label">HWID сбросов</div></div>
+    </div>
+
+    <div class="content">
+        <div class="tabs">
+            <button class="tab active" data-tab="keys">Ключи</button>
+            <button class="tab" data-tab="users">Пользователи</button>
+            <button class="tab" data-tab="logs">Логи</button>
+            <button class="tab" data-tab="client">Клиент</button>
+        </div>
+
+        <!-- Keys -->
+        <div class="section active" id="tab-keys">
+            <div class="toolbar">
+                <button onclick="showGenerateModal('admin')" style="background:#8b82f0;">+ Админ ключ</button>
+                <button onclick="showGenerateModal('client')">+ Клиент ключ</button>
+            </div>
+            <table>
+                <thead><tr><th>Ключ</th><th>Пользователь</th><th>Тип</th><th>Срок</th><th>HWID</th><th>Статус</th><th></th></tr></thead>
+                <tbody id="keysBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Users -->
+        <div class="section" id="tab-users">
+            <table>
+                <thead><tr><th>Username</th><th>HWID</th><th>Роль</th><th>Регистрация</th><th>Последний вход</th><th></th></tr></thead>
+                <tbody id="usersBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Logs -->
+        <div class="section" id="tab-logs">
+            <div class="toolbar"><button onclick="loadLogs()">Обновить</button></div>
+            <table>
+                <thead><tr><th>Время</th><th>Событие</th><th>User</th><th>HWID</th><th>IP</th><th>Детали</th></tr></thead>
+                <tbody id="logsBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Client Upload -->
+        <div class="section" id="tab-client">
+            <div style="background:#151a25;border:1px solid #1e2436;border-radius:12px;padding:32px;max-width:500px;">
+                <h3 style="margin-bottom:16px;">Загрузить клиент</h3>
+                <p style="font-size:13px;color:#5c6580;margin-bottom:16px;">Загрузите client.jar для стриминга клиентам</p>
+                <input type="file" id="clientFile" accept=".jar">
+                <input type="text" id="clientVersion" placeholder="Версия (1.0.0)" value="1.0.0" style="margin-top:8px;">
+                <button onclick="uploadClient()" style="margin-top:12px;">Загрузить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Generate Modal -->
+<div class="modal-overlay" id="genModal">
+    <div class="modal">
+        <button class="close" onclick="closeModal()">×</button>
+        <h3 id="genModalTitle">Генерация ключей</h3>
+        <input type="hidden" id="genKeyType" value="client">
+        <input type="number" id="genCount" placeholder="Количество" value="5" min="1" max="100">
+        <input type="number" id="genDuration" placeholder="Дней (30)" value="30">
+        <input type="number" id="genHWIDLimit" placeholder="Лимит HWID (1)" value="1">
+        <button onclick="generateKeys()">Сгенерировать</button>
+        <div class="key-list" id="genResult" style="display:none;"></div>
+    </div>
+</div>
+
+<script>
+    let token = localStorage.getItem('jartix_admin_token');
+    const API = window.location.origin;
+
+    // ── Auth ───────────────────────────────────────────
+    async function doLogin() {
+        const u = document.getElementById('loginUser').value;
+        const p = document.getElementById('loginPass').value;
+        const err = document.getElementById('loginError');
+        try {
+            const r = await fetch(`${API}/admin/api/login`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: u, password: p })
+            });
+            const d = await r.json();
+            if (!r.ok) { err.textContent = d.error; err.style.display = 'block'; return; }
+            token = d.token;
+            localStorage.setItem('jartix_admin_token', token);
+            showPanel();
+        } catch (e) { err.textContent = 'Connection error'; err.style.display = 'block'; }
+    }
+
+    function doLogout() {
+        token = null;
+        localStorage.removeItem('jartix_admin_token');
+        document.getElementById('loginView').style.display = 'flex';
+        document.getElementById('panelView').style.display = 'none';
+    }
+
+    async function api(path, opts = {}) {
+        const r = await fetch(`${API}${path}`, {
+            ...opts,
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...opts.headers }
+        });
+        if (r.status === 401 || r.status === 403) { doLogout(); throw new Error('Auth expired'); }
+        return r.json();
+    }
+
+    // ── Panel ──────────────────────────────────────────
+    async function showPanel() {
+        document.getElementById('loginView').style.display = 'none';
+        document.getElementById('panelView').style.display = 'block';
+        loadStats();
+        loadKeys();
+        loadUsers();
+        loadLogs();
+    }
+
+    async function loadStats() {
+        try {
+            const s = await api('/admin/api/stats');
+            document.getElementById('statUsers').textContent = s.totalUsers;
+            document.getElementById('statKeys').textContent = s.totalKeys;
+            document.getElementById('statActive').textContent = s.activeKeys;
+            document.getElementById('statSessions').textContent = s.activeSessions;
+            document.getElementById('statResets').textContent = s.totalHWIDResets;
+        } catch {}
+    }
+
+    // ── Tabs ───────────────────────────────────────────
+    document.querySelectorAll('.tab').forEach(t => {
+        t.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+            document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
+            t.classList.add('active');
+            document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+        });
+    });
+
+    // ── Keys ───────────────────────────────────────────
+    async function loadKeys() {
+        try {
+            const keys = await api('/admin/api/keys');
+            const tbody = document.getElementById('keysBody');
+            tbody.innerHTML = keys.map(k => {
+                const typeBadge = k.key_type === 'admin'
+                    ? '<span class="badge" style="background:rgba(139,130,240,0.1);color:#8b82f0;">АДМИН</span>'
+                    : '<span class="badge badge-blue">КЛИЕНТ</span>';
+                return `
+                <tr>
+                    <td style="font-family:monospace;color:#4a8eff;">${k.key_code}</td>
+                    <td>${k.username || '-'}</td>
+                    <td>${typeBadge}</td>
+                    <td>${k.duration_days}д</td>
+                    <td style="font-size:11px;">${k.hwid ? k.hwid.substring(0, 12) + '...' : '-'}</td>
+                    <td>${k.active ? '<span class="badge badge-green">Активен</span>' : '<span class="badge badge-red">Деактивирован</span>'}</td>
+                    <td>${k.active ? `<button class="action-btn danger" onclick="deactivateKey('${k.id}')">Деакт.</button>` : ''}</td>
+                </tr>`;
+            }).join('');
+        } catch {}
+    }
+
+    function showGenerateModal(type) {
+        document.getElementById('genKeyType').value = type;
+        document.getElementById('genModalTitle').textContent = type === 'admin'
+            ? 'Генерация АДМИНского ключа' : 'Генерация клиентских ключей';
+        document.getElementById('genResult').style.display = 'none';
+        document.getElementById('genModal').classList.add('show');
+    }
+    function closeModal() { document.getElementById('genModal').classList.remove('show'); }
+
+    async function generateKeys() {
+        const count = parseInt(document.getElementById('genCount').value) || 5;
+        const duration = parseInt(document.getElementById('genDuration').value) || 30;
+        const hwidLimit = parseInt(document.getElementById('genHWIDLimit').value) || 1;
+        const keyType = document.getElementById('genKeyType').value || 'client';
+        try {
+            const r = await api('/admin/api/keys/generate', {
+                method: 'POST',
+                body: JSON.stringify({ count, duration_days: duration, hwid_limit: hwidLimit, key_type: keyType })
+            });
+            const result = document.getElementById('genResult');
+            result.style.display = 'block';
+            result.innerHTML = r.keys.join('<br>');
+            loadKeys();
+            loadStats();
+        } catch {}
+    }
+
+    async function deactivateKey(id) {
+        if (!confirm('Деактивировать ключ?')) return;
+        await api(`/admin/api/keys/${id}`, { method: 'DELETE' });
+        loadKeys();
+        loadStats();
+    }
+
+    // ── Users ──────────────────────────────────────────
+    async function loadUsers() {
+        try {
+            const users = await api('/admin/api/users');
+            const tbody = document.getElementById('usersBody');
+            tbody.innerHTML = users.map(u => `
+                <tr>
+                    <td>${u.username}</td>
+                    <td style="font-size:11px;font-family:monospace;">${u.hwid ? u.hwid.substring(0, 16) + '...' : '-'}</td>
+                    <td><span class="badge badge-blue">${u.role}</span></td>
+                    <td>${u.created_at || '-'}</td>
+                    <td>${u.last_login || '-'}</td>
+                    <td>${u.role !== 'admin' ? `<button class="action-btn warn" onclick="resetHWID('${u.id}')">Сброс HWID</button>` : ''}</td>
+                </tr>
+            `).join('');
+        } catch {}
+    }
+
+    async function resetHWID(userId) {
+        if (!confirm('Сбросить HWID пользователя? Он потеряет доступ до повторной активации.')) return;
+        await api(`/admin/api/users/${userId}/reset-hwid`, { method: 'POST' });
+        loadUsers();
+        loadKeys();
+        loadStats();
+    }
+
+    // ── Logs ───────────────────────────────────────────
+    async function loadLogs() {
+        try {
+            const logs = await api('/admin/api/logs?limit=100');
+            const tbody = document.getElementById('logsBody');
+            tbody.innerHTML = logs.map(l => `
+                <tr>
+                    <td style="font-size:11px;">${l.created_at}</td>
+                    <td><span class="badge badge-blue">${l.event}</span></td>
+                    <td style="font-size:12px;">${l.user_id ? l.user_id.substring(0, 8) + '...' : '-'}</td>
+                    <td style="font-size:11px;font-family:monospace;">${l.hwid ? l.hwid.substring(0, 10) + '...' : '-'}</td>
+                    <td style="font-size:12px;">${l.ip || '-'}</td>
+                    <td style="font-size:12px;">${l.details || '-'}</td>
+                </tr>
+            `).join('');
+        } catch {}
+    }
+
+    // ── Client Upload ──────────────────────────────────
+    async function uploadClient() {
+        const file = document.getElementById('clientFile').files[0];
+        const version = document.getElementById('clientVersion').value || '1.0.0';
+        if (!file) return alert('Выберите файл');
+        const fd = new FormData();
+        fd.append('client', file);
+        fd.append('version', version);
+        try {
+            await fetch(`${API}/admin/api/client/upload`, {
+                method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: fd
+            });
+            alert('Клиент загружен!');
+        } catch (e) { alert('Ошибка: ' + e.message); }
+    }
+
+    // ── Init ───────────────────────────────────────────
+    if (token) { showPanel(); }
+
+    // Auto-refresh stats every 10 seconds
+    setInterval(() => {
+        if (document.getElementById('panelView').style.display !== 'none') loadStats();
+    }, 10000);
+</script>
+
+</body>
+</html>
