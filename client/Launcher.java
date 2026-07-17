@@ -13,7 +13,7 @@ import java.util.Scanner;
  */
 public class Launcher {
 
-    private static final String SERVER = System.getenv().getOrDefault("JARTIX_SERVER", "http://localhost:3000");
+    private static final String SERVER = System.getenv().getOrDefault("JARTIX_SERVER", "https://launcher-server-wl84.onrender.com");
     private static final String VERSION = "1.0.0";
 
     public static void main(String[] args) throws Exception {
@@ -116,7 +116,8 @@ public class Launcher {
             for (byte b : hash) hex.append(String.format("%02x", b));
             return hex.toString();
         } catch (Exception e) {
-            return "fallback-" + System.getenv().get("COMPUTERNAME", "unknown");
+            String envName = System.getenv("COMPUTERNAME");
+            return "fallback-" + (envName != null ? envName : "unknown");
         }
     }
 
@@ -126,13 +127,12 @@ public class Launcher {
             String json = String.format("{\"username\":\"%s\",\"password\":\"%s\"}", username, password);
             String resp = post(SERVER + "/api/auth/login", json, null);
             if (resp == null) return null;
-            // Extract token
             int idx = resp.indexOf("\"token\":\"");
             if (idx < 0) return null;
             int start = idx + 9;
             int end = resp.indexOf("\"", start);
             return resp.substring(start, end);
-        } catch { return null; }
+        } catch (Exception e) { return null; }
     }
 
     static boolean activateKey(String token, String key, String hwid) {
@@ -140,7 +140,7 @@ public class Launcher {
             String json = String.format("{\"key\":\"%s\",\"hwid\":\"%s\"}", key, hwid);
             String resp = post(SERVER + "/api/launcher/activate", json, token);
             return resp != null && resp.contains("\"ok\":true");
-        } catch { return false; }
+        } catch (Exception e) { return false; }
     }
 
     static String validateSession(String token, String hwid) {
@@ -153,7 +153,7 @@ public class Launcher {
             int start = idx + 11;
             int end = resp.indexOf("\"", start);
             return resp.substring(start, end);
-        } catch { return null; }
+        } catch (Exception e) { return null; }
     }
 
     static byte[] streamClient(String session) {
@@ -173,7 +173,7 @@ public class Launcher {
             int n;
             while ((n = is.read(buf)) != -1) baos.write(buf, 0, n);
             return baos.toByteArray();
-        } catch { return null; }
+        } catch (Exception e) { return null; }
     }
 
     // ── HTTP Helper ────────────────────────────────────
@@ -192,20 +192,18 @@ public class Launcher {
             String line;
             while ((line = br.readLine()) != null) sb.append(line);
             return sb.toString();
-        } catch { return null; }
+        } catch (Exception e) { return null; }
     }
 
     // ── Decrypt ────────────────────────────────────────
     static byte[] decrypt(byte[] data) throws Exception {
-        // First 16 bytes = IV, rest = encrypted
         byte[] iv = new byte[16];
         byte[] encrypted = new byte[data.length - 16];
         System.arraycopy(data, 0, iv, 0, 16);
         System.arraycopy(data, 16, encrypted, 0, encrypted.length);
 
-        // Key from server env (must match ENCRYPTION_KEY on server)
-        String keyHex = System.getenv().get("ENCRYPTION_KEY",
-            "0000000000000000000000000000000000000000000000000000000000000000");
+        String keyHexEnv = System.getenv("ENCRYPTION_KEY");
+        String keyHex = keyHexEnv != null ? keyHexEnv : "0000000000000000000000000000000000000000000000000000000000000000";
         byte[] key = hexToBytes(keyHex);
 
         SecretKeySpec secretKey = new SecretKeySpec(key, "AES");
@@ -224,7 +222,6 @@ public class Launcher {
 
     // ── Load JAR in memory ─────────────────────────────
     static void loadAndRun(byte[] jarData) throws Exception {
-        // Write to temp file, load, delete
         Path temp = Files.createTempFile("jartix-", ".jar");
         Files.write(temp, jarData);
 
@@ -233,14 +230,9 @@ public class Launcher {
             Launcher.class.getClassLoader()
         );
 
-        // Find main class (assumes first class with main method)
-        // In production, server should specify the main class
         System.out.println("[CLIENT] Клиент загружен в память");
         System.out.println("[CLIENT] Для запуска укажите main class в настройках");
 
-        // Example: loader.loadClass("com.jartix.Client").getMethod("main", String[].class).invoke(null, (Object) new String[]{});
-
-        // Cleanup
         Files.deleteIfExists(temp);
         System.out.println("[CLIENT] Temp файл удалён");
     }
