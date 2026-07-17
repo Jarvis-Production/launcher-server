@@ -14,7 +14,7 @@ const upload = multer({ dest: path.join(__dirname, 'client') });
 router.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        const user = await db.prepare('SELECT * FROM users WHERE username = ? AND role = ?').get(username, 'admin');
+        const user = db.prepare('SELECT * FROM users WHERE username = ? AND role = ?').get(username, 'admin');
         if (!user) return res.status(401).json({ error: 'Invalid credentials' });
         if (!bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Invalid credentials' });
         const token = jwt.sign({ id: user.id, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
@@ -35,18 +35,18 @@ function adminAuth(req, res, next) {
 
 router.get('/api/stats', adminAuth, async (req, res) => {
     try {
-        const totalUsers = (await db.prepare('SELECT COUNT(*) as c FROM users').get()).c;
-        const totalKeys = (await db.prepare('SELECT COUNT(*) as c FROM keys').get()).c;
-        const activeKeys = (await db.prepare('SELECT COUNT(*) as c FROM keys WHERE active = 1 AND expires_at > datetime(\'now\')').get()).c;
-        const activeSessions = (await db.prepare('SELECT COUNT(*) as c FROM sessions WHERE active = 1 AND last_active > datetime(\'now\', \'-5 minutes\')').get()).c;
-        const totalHWIDResets = (await db.prepare('SELECT COUNT(*) as c FROM logs WHERE event = ?').get('hwid_reset')).c;
+        const totalUsers = (db.prepare('SELECT COUNT(*) as c FROM users').get()).c;
+        const totalKeys = (db.prepare('SELECT COUNT(*) as c FROM keys').get()).c;
+        const activeKeys = (db.prepare('SELECT COUNT(*) as c FROM keys WHERE active = 1 AND expires_at > datetime(\'now\')').get()).c;
+        const activeSessions = (db.prepare('SELECT COUNT(*) as c FROM sessions WHERE active = 1 AND last_active > datetime(\'now\', \'-5 minutes\')').get()).c;
+        const totalHWIDResets = (db.prepare('SELECT COUNT(*) as c FROM logs WHERE event = ?').get('hwid_reset')).c;
         res.json({ totalUsers, totalKeys, activeKeys, activeSessions, totalHWIDResets });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/api/keys', adminAuth, async (req, res) => {
     try {
-        const keys = await db.prepare('SELECT k.*, u.username FROM keys k LEFT JOIN users u ON k.user_id = u.id ORDER BY k.created_at DESC').all();
+        const keys = db.prepare('SELECT k.*, u.username FROM keys k LEFT JOIN users u ON k.user_id = u.id ORDER BY k.created_at DESC').all();
         res.json(keys);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -58,34 +58,34 @@ router.post('/api/keys/generate', adminAuth, async (req, res) => {
         const keys = [];
         for (let i = 0; i < Math.min(count, 100); i++) {
             const keyCode = generateKey();
-            await db.prepare('INSERT INTO keys (id, key_code, key_type, duration_days, hwid_limit, created_by) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), keyCode, type, duration_days, hwid_limit, 'admin');
+            db.prepare('INSERT INTO keys (id, key_code, key_type, duration_days, hwid_limit, created_by) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), keyCode, type, duration_days, hwid_limit, 'admin');
             keys.push(keyCode);
         }
-        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('keys_generated', `${count} ${type} keys`);
+        db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('keys_generated', `${count} ${type} keys`);
         res.json({ ok: true, keys, keyType: type });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete('/api/keys/:id', adminAuth, async (req, res) => {
     try {
-        await db.prepare('UPDATE keys SET active = 0 WHERE id = ?').run(req.params.id);
+        db.prepare('UPDATE keys SET active = 0 WHERE id = ?').run(req.params.id);
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/api/users', adminAuth, async (req, res) => {
     try {
-        const users = await db.prepare('SELECT id, username, role, hwid, created_at, last_login FROM users ORDER BY created_at DESC').all();
+        const users = db.prepare('SELECT id, username, role, hwid, created_at, last_login FROM users ORDER BY created_at DESC').all();
         res.json(users);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/api/users/:id/reset-hwid', adminAuth, async (req, res) => {
     try {
-        await db.prepare('UPDATE keys SET hwid = NULL, user_id = NULL, activated_at = NULL, expires_at = NULL WHERE user_id = ?').run(req.params.id);
-        await db.prepare('UPDATE users SET hwid = NULL WHERE id = ?').run(req.params.id);
-        await db.prepare('UPDATE sessions SET active = 0 WHERE user_id = ?').run(req.params.id);
-        await db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('hwid_reset', req.params.id, 'admin reset');
+        db.prepare('UPDATE keys SET hwid = NULL, user_id = NULL, activated_at = NULL, expires_at = NULL WHERE user_id = ?').run(req.params.id);
+        db.prepare('UPDATE users SET hwid = NULL WHERE id = ?').run(req.params.id);
+        db.prepare('UPDATE sessions SET active = 0 WHERE user_id = ?').run(req.params.id);
+        db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('hwid_reset', req.params.id, 'admin reset');
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -93,7 +93,7 @@ router.post('/api/users/:id/reset-hwid', adminAuth, async (req, res) => {
 router.get('/api/logs', adminAuth, async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-        const logs = await db.prepare('SELECT * FROM logs ORDER BY created_at DESC LIMIT ?').all(limit);
+        const logs = db.prepare('SELECT * FROM logs ORDER BY created_at DESC LIMIT ?').all(limit);
         res.json(logs);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -102,9 +102,9 @@ router.post('/api/client/set-url', adminAuth, async (req, res) => {
     try {
         const { url } = req.body;
         if (!url) return res.status(400).json({ error: 'URL required' });
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_url', url);
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
-        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_url_set', url);
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_url', url);
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
+        db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_url_set', url);
         res.json({ ok: true, url });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -115,9 +115,9 @@ router.post('/api/client/upload', adminAuth, upload.single('client'), async (req
         const fs = require('fs');
         const jarData = fs.readFileSync(req.file.path);
         fs.unlinkSync(req.file.path);
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_jar', jarData.toString('base64'));
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
-        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_upload', `version ${req.body.version || '1.0.0'}`);
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_jar', jarData.toString('base64'));
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
+        db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_upload', `version ${req.body.version || '1.0.0'}`);
         res.json({ ok: true, message: 'Client uploaded', size: jarData.length });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -127,3 +127,4 @@ router.get('/', (req, res) => {
 });
 
 module.exports = router;
+
