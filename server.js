@@ -52,11 +52,12 @@ app.post('/api/client/download-and-encrypt', async (req, res) => {
         const { url } = req.body;
         if (!url) return res.status(400).json({ error: 'URL required' });
         
-        // Use the fixed key directly - ignore DB
-        const encKey = Buffer.from(ENCRYPTION_KEY, 'hex');
-        console.log(`[Client] Enc key buffer length: ${encKey.length}`);
+        // Hardcoded 32-byte key (64 hex chars)
+        const KEY_HEX = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2';
+        const encKey = Buffer.from(KEY_HEX, 'hex');
+        console.log(`[Client] KEY_HEX length: ${KEY_HEX.length}, encKey length: ${encKey.length}`);
         if (encKey.length !== 32) {
-            return res.status(500).json({ error: 'Invalid encryption key length', got: encKey.length });
+            return res.status(500).json({ error: 'Key length mismatch', hexLen: KEY_HEX.length, bufLen: encKey.length });
         }
         
         console.log(`[Client] Downloading from: ${url}`);
