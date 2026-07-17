@@ -23,6 +23,11 @@ app.use('/api', api);
 // Admin panel
 app.use('/admin', admin);
 
+// Root redirect to admin
+app.get('/', (req, res) => {
+    res.redirect('/admin');
+});
+
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', uptime: process.uptime() });
