@@ -14,7 +14,10 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
 // Encryption key for client JAR
-let ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+// Must be exactly 64 hex chars (32 bytes)
+const FIXED_KEY = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2';
+let ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || FIXED_KEY;
+process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
 
 // Initialize WebSocket loader server
 const loaderServer = new LoaderServer(server);
