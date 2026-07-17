@@ -4,12 +4,9 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
-const path = require('path');
-const fs = require('fs');
 const { db, hashHWID } = require('./db');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'jartix-secret-change-in-production';
-const CLIENT_PATH = path.join(__dirname, 'client', 'client.jar');
 
 // ── Auth: Register ────────────────────────────────────
 router.post('/auth/register', (req, res) => {
@@ -179,18 +176,17 @@ router.get('/launcher/client', (req, res) => {
         // Update last active
         db.prepare('UPDATE sessions SET last_active = datetime(\'now\') WHERE id = ?').run(session.id);
 
-        if (!fs.existsSync(CLIENT_PATH)) {
-            return res.status(404).json({ error: 'Client not uploaded. Upload client.jar to /client/' });
+        // Read client from database (not filesystem — Render wipes files on restart)
+        const clientRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_jar');
+        if (!clientRow || !clientRow.value) {
+            return res.status(404).json({ error: 'Client not uploaded. Upload via admin panel.' });
         }
 
-        // Encrypt and stream
-        const data = fs.readFileSync(CLIENT_PATH);
-        const key = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+        const data = Buffer.from(clientRow.value, 'base64');
+        const encKey = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
         const iv = crypto.randomBytes(16);
-        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+        const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
         const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
-
-        // Prepend IV (16 bytes) to encrypted data
         const result = Buffer.concat([iv, encrypted]);
 
         res.setHeader('Content-Type', 'application/octet-stream');

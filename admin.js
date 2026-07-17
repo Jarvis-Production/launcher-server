@@ -131,16 +131,17 @@ router.get('/api/logs', adminAuth, (req, res) => {
     }
 });
 
-// ── Admin: Upload client JAR ──────────────────────────
+// ── Admin: Upload client JAR (stored in DB, not filesystem) ──
 router.post('/api/client/upload', adminAuth, upload.single('client'), (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file' });
-        const dest = path.join(__dirname, 'client', 'client.jar');
         const fs = require('fs');
-        fs.renameSync(req.file.path, dest);
+        const jarData = fs.readFileSync(req.file.path);
+        fs.unlinkSync(req.file.path); // cleanup temp
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_jar', jarData.toString('base64'));
         db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
-        db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_upload', `version ${req.body.version || '1.0.0'}`);
-        res.json({ ok: true, message: 'Client uploaded' });
+        db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_upload', `version ${req.body.version || '1.0.0'}, size ${jarData.length} bytes`);
+        res.json({ ok: true, message: 'Client uploaded', size: jarData.length });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
