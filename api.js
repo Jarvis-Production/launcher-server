@@ -84,12 +84,13 @@ router.post('/launcher/activate', auth, (req, res) => {
             }
         }
 
-        // Activate
+        // Activate — use SQLite-compatible datetime format
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + keyRow.duration_days);
+        const expiresStr = expiresAt.toISOString().replace('T', ' ').replace('Z', '');
 
         db.prepare(`UPDATE keys SET user_id = ?, hwid = ?, activated_at = datetime('now'), expires_at = ? WHERE id = ?`)
-            .run(req.user.id, hashedHWID, expiresAt.toISOString(), keyRow.id);
+            .run(req.user.id, hashedHWID, expiresStr, keyRow.id);
 
         // Update user HWID
         db.prepare('UPDATE users SET hwid = ? WHERE id = ?').run(hashedHWID, req.user.id);
