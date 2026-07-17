@@ -1,0 +1,6 @@
+node_modules/
+jartix.db
+jartix.db-wal
+jartix.db-shm
+client/client.jar
+.env
