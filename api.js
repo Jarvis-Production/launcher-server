@@ -9,20 +9,20 @@ const { db, hashHWID } = require('./db');
 const JWT_SECRET = process.env.JWT_SECRET || 'jartix-secret-change-in-production';
 
 // ── Auth: Register ────────────────────────────────────
-router.post('/auth/register', (req, res) => {
+router.post('/auth/register', async (req, res) => {
     try {
         const { username, password } = req.body;
         if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
         if (username.length < 3 || username.length > 20) return res.status(400).json({ error: 'Username 3-20 chars' });
         if (password.length < 6) return res.status(400).json({ error: 'Password min 6 chars' });
 
-        const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+        const exists = await db.prepare('SELECT id FROM users WHERE username = ?').get(username);
         if (exists) return res.status(409).json({ error: 'Username taken' });
 
         const id = uuidv4();
         const hash = bcrypt.hashSync(password, 10);
-        db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)').run(id, username, hash);
-        db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('register', id, username);
+        await db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)').run(id, username, hash);
+        await db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('register', id, username);
 
         res.json({ ok: true, message: 'Account created' });
     } catch (e) {
@@ -31,16 +31,16 @@ router.post('/auth/register', (req, res) => {
 });
 
 // ── Auth: Login ───────────────────────────────────────
-router.post('/auth/login', (req, res) => {
+router.post('/auth/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+        const user = await db.prepare('SELECT * FROM users WHERE username = ?').get(username);
         if (!user) return res.status(401).json({ error: 'Invalid credentials' });
         if (!bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Invalid credentials' });
 
-        db.prepare('UPDATE users SET last_login = datetime(\'now\') WHERE id = ?').run(user.id);
+        await db.prepare('UPDATE users SET last_login = datetime(\'now\') WHERE id = ?').run(user.id);
         const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-        db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('login', user.id, user.username);
+        await db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('login', user.id, user.username);
 
         res.json({ ok: true, token, username: user.username, role: user.role });
     } catch (e) {
@@ -61,105 +61,79 @@ function auth(req, res, next) {
 }
 
 // ── Launcher: Activate key ────────────────────────────
-router.post('/launcher/activate', auth, (req, res) => {
+router.post('/launcher/activate', auth, async (req, res) => {
     try {
         const { key, hwid } = req.body;
         if (!key || !hwid) return res.status(400).json({ error: 'Key and HWID required' });
 
-        const keyRow = db.prepare('SELECT * FROM keys WHERE key_code = ?').get(key);
+        const keyRow = await db.prepare('SELECT * FROM keys WHERE key_code = ?').get(key);
         if (!keyRow) return res.status(404).json({ error: 'Key not found' });
         if (!keyRow.active) return res.status(403).json({ error: 'Key deactivated' });
 
-        // Check if key already activated by another user
         if (keyRow.user_id && keyRow.user_id !== req.user.id) {
             return res.status(403).json({ error: 'Key already used by another account' });
         }
 
-        // Check HWID limit
         const hashedHWID = hashHWID(hwid);
         if (keyRow.user_id === req.user.id && keyRow.hwid) {
-            // Already activated — check HWID match
             if (keyRow.hwid !== hashedHWID) {
                 return res.status(403).json({ error: 'HWID mismatch. Contact support for reset.' });
             }
         }
 
-        // Activate — use SQLite-compatible datetime format
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + keyRow.duration_days);
         const expiresStr = expiresAt.toISOString().replace('T', ' ').replace('Z', '');
 
-        db.prepare(`UPDATE keys SET user_id = ?, hwid = ?, activated_at = datetime('now'), expires_at = ? WHERE id = ?`)
+        await db.prepare(`UPDATE keys SET user_id = ?, hwid = ?, activated_at = datetime('now'), expires_at = ? WHERE id = ?`)
             .run(req.user.id, hashedHWID, expiresStr, keyRow.id);
 
-        // Update user HWID
-        db.prepare('UPDATE users SET hwid = ? WHERE id = ?').run(hashedHWID, req.user.id);
+        await db.prepare('UPDATE users SET hwid = ? WHERE id = ?').run(hashedHWID, req.user.id);
 
-        db.prepare('INSERT INTO logs (event, user_id, hwid, details) VALUES (?, ?, ?, ?)')
+        await db.prepare('INSERT INTO logs (event, user_id, hwid, details) VALUES (?, ?, ?, ?)')
             .run('activate', req.user.id, hashedHWID, key);
 
-        res.json({ ok: true, expires: expiresAt.toISOString() });
+        res.json({ ok: true, expires: expiresStr });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
 // ── Launcher: Validate + get session ──────────────────
-router.post('/launcher/validate', auth, (req, res) => {
+router.post('/launcher/validate', auth, async (req, res) => {
     try {
         const { hwid } = req.body;
         if (!hwid) return res.status(400).json({ error: 'HWID required' });
 
         const hashedHWID = hashHWID(hwid);
-        const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+        const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
 
-        // Check active key
-        const key = db.prepare(`SELECT * FROM keys WHERE user_id = ? AND active = 1 AND expires_at > datetime('now') ORDER BY expires_at DESC LIMIT 1`)
+        const key = await db.prepare(`SELECT * FROM keys WHERE user_id = ? AND active = 1 AND expires_at > datetime('now') ORDER BY expires_at DESC LIMIT 1`)
             .get(req.user.id);
         if (!key) return res.status(403).json({ error: 'No active subscription' });
 
-        // Check HWID
         if (key.hwid && key.hwid !== hashedHWID) {
             return res.status(403).json({ error: 'HWID mismatch' });
         }
 
-        // Create session
         const sessionId = uuidv4();
         const sessionToken = crypto.randomBytes(32).toString('hex');
-        db.prepare('INSERT INTO sessions (id, user_id, hwid, ip, token) VALUES (?, ?, ?, ?, ?)')
+        await db.prepare('INSERT INTO sessions (id, user_id, hwid, ip, token) VALUES (?, ?, ?, ?, ?)')
             .run(sessionId, req.user.id, hashedHWID, req.ip, sessionToken);
 
-        db.prepare('INSERT INTO logs (event, user_id, hwid, ip) VALUES (?, ?, ?, ?)')
+        await db.prepare('INSERT INTO logs (event, user_id, hwid, ip) VALUES (?, ?, ?, ?)')
             .run('validate', req.user.id, hashedHWID, req.ip);
 
-        // Determine display info based on key type
-        let displayName, avatarUrl;
+        let displayName;
         if (key.key_type === 'admin') {
             displayName = 'J.P';
-            avatarUrl = 'https://mc-heads.net/avatar/J.P/64';
         } else {
-            // Generate random Minecraft name + avatar
-            const randomNames = [
-                'xXDarkXx', 'ShadowPlay', 'EnderCraft', 'BlockMaster',
-                'NetherStar', 'CreeperSlayer', 'DiamondKing', 'RedstonePro',
-                'PistonPush', 'TNTBlast', 'WitherHunter', 'EndCrystal',
-                'SoulSand', 'BlazeRod', 'WitherSkull', 'ObsidianWall',
-                'CaveSpider', 'IronGolem', 'SnowGolem', 'Mooshroom'
-            ];
-            const randomSuffix = Math.floor(Math.random() * 9000) + 1000;
-            displayName = randomNames[Math.floor(Math.random() * randomNames.length)] + randomSuffix;
-            avatarUrl = `https://mc-heads.net/avatar/${displayName}/64`;
+            const randomNames = ['xXDarkXx', 'ShadowPlay', 'EnderCraft', 'BlockMaster', 'NetherStar', 'CreeperSlayer'];
+            displayName = randomNames[Math.floor(Math.random() * randomNames.length)] + Math.floor(Math.random() * 9000 + 1000);
         }
 
-        res.json({
-            ok: true,
-            session: sessionToken,
-            expires: key.expires_at,
-            keyType: key.key_type,
-            displayName,
-            avatarUrl
-        });
+        res.json({ ok: true, session: sessionToken, expires: key.expires_at, keyType: key.key_type, displayName });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -171,86 +145,47 @@ router.get('/launcher/client', async (req, res) => {
         const sessionToken = req.headers['x-session'];
         if (!sessionToken) return res.status(401).json({ error: 'Session required' });
 
-        const session = db.prepare('SELECT * FROM sessions WHERE token = ? AND active = 1').get(sessionToken);
+        const session = await db.prepare('SELECT * FROM sessions WHERE token = ? AND active = 1').get(sessionToken);
         if (!session) return res.status(401).json({ error: 'Invalid session' });
 
-        // Update last active
-        db.prepare('UPDATE sessions SET last_active = datetime(\'now\') WHERE id = ?').run(session.id);
+        await db.prepare('UPDATE sessions SET last_active = datetime(\'now\') WHERE id = ?').run(session.id);
 
-        // Try DB first, then env var, then external URL
         let data = null;
-        const clientRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_jar');
+        const clientRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_jar');
         if (clientRow && clientRow.value) {
             data = Buffer.from(clientRow.value, 'base64');
         } else {
-            // Try CLIENT_URL env var (persists across Render restarts)
             const envUrl = process.env.CLIENT_URL;
             if (envUrl) {
-                try {
-                    const http = envUrl.startsWith('https') ? require('https') : require('http');
-                    data = await new Promise((resolve, reject) => {
-                        http.get(envUrl, (res) => {
-                            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                                // Follow redirect
-                                http.get(res.headers.location, (res2) => {
-                                    const chunks = [];
-                                    res2.on('data', chunk => chunks.push(chunk));
-                                    res2.on('end', () => resolve(Buffer.concat(chunks)));
-                                    res2.on('error', reject);
-                                }).on('error', reject);
-                                return;
-                            }
-                            const chunks = [];
-                            res.on('data', chunk => chunks.push(chunk));
-                            res.on('end', () => resolve(Buffer.concat(chunks)));
-                            res.on('error', reject);
-                        }).on('error', reject);
-                    });
-                } catch (e) {
-                    return res.status(502).json({ error: 'Failed to download client: ' + e.message });
-                }
-            } else {
-                // Try DB URL (might be wiped on restart)
-                const urlRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_url');
-                if (urlRow && urlRow.value) {
-                    try {
-                        const http = urlRow.value.startsWith('https') ? require('https') : require('http');
-                        data = await new Promise((resolve, reject) => {
-                            http.get(urlRow.value, (res) => {
-                                const chunks = [];
-                                res.on('data', chunk => chunks.push(chunk));
-                                res.on('end', () => resolve(Buffer.concat(chunks)));
-                                res.on('error', reject);
-                            }).on('error', reject);
-                        });
-                    } catch (e) {
-                        return res.status(502).json({ error: 'Failed to download client' });
-                    }
-                }
+                const http = envUrl.startsWith('https') ? require('https') : require('http');
+                data = await new Promise((resolve, reject) => {
+                    http.get(envUrl, (res) => {
+                        const chunks = [];
+                        res.on('data', chunk => chunks.push(chunk));
+                        res.on('end', () => resolve(Buffer.concat(chunks)));
+                        res.on('error', reject);
+                    }).on('error', reject);
+                });
             }
         }
 
-        if (!data) {
-            return res.status(404).json({ error: 'Client not uploaded. Set CLIENT_URL env var or upload via admin.' });
-        }
+        if (!data) return res.status(404).json({ error: 'Client not uploaded' });
+
         const encKey = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
         const iv = crypto.randomBytes(16);
         const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
         const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
-        const result = Buffer.concat([iv, encrypted]);
 
         res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Length', result.length);
-        res.setHeader('Content-Disposition', 'attachment; filename="client.bin"');
-        res.send(result);
+        res.send(Buffer.concat([iv, encrypted]));
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
-// ── Launcher: Check for updates ───────────────────────
-router.get('/launcher/version', (req, res) => {
-    const versionSetting = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_version');
+// ── Launcher: Check version ───────────────────────────
+router.get('/launcher/version', async (req, res) => {
+    const versionSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_version');
     res.json({ version: versionSetting?.value || '1.0.0' });
 });
 

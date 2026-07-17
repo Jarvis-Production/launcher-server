@@ -7,64 +7,60 @@ const TURSO_URL = process.env.TURSO_URL;
 const TURSO_TOKEN = process.env.TURSO_AUTH_TOKEN;
 
 let client;
+let isTurso = false;
 
 if (TURSO_URL && TURSO_TOKEN) {
     client = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
+    isTurso = true;
     console.log('[DB] Connected to Turso');
 } else {
     const Database = require('better-sqlite3');
     const path = require('path');
-    const localDb = new Database(path.join(__dirname, 'jartix.db'));
-    localDb.pragma('journal_mode = WAL');
-    localDb.pragma('foreign_keys = ON');
-    client = localDb;
+    client = new Database(path.join(__dirname, 'jartix.db'));
+    client.pragma('journal_mode = WAL');
+    client.pragma('foreign_keys = ON');
     console.log('[DB] Using local SQLite');
 }
 
-// Wrapper that mimics better-sqlite3 API for compatibility
+// Async wrapper for Turso
 const db = {
     prepare(sql) {
         return {
-            get(...args) {
-                const flatArgs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
-                if (client.prepare) {
-                    return client.prepare(sql).get(...flatArgs);
-                } else {
-                    const result = client.executeSync({ sql, args: flatArgs });
-                    return result.rows[0] || null;
+            async get(...args) {
+                if (!isTurso) {
+                    return client.prepare(sql).get(...args);
                 }
+                const result = await client.execute({ sql, args: args.length === 1 && Array.isArray(args[0]) ? args[0] : args });
+                return result.rows[0] || null;
             },
-            all(...args) {
-                const flatArgs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
-                if (client.prepare) {
-                    return client.prepare(sql).all(...flatArgs);
-                } else {
-                    const result = client.executeSync({ sql, args: flatArgs });
-                    return result.rows;
+            async all(...args) {
+                if (!isTurso) {
+                    return client.prepare(sql).all(...args);
                 }
+                const result = await client.execute({ sql, args: args.length === 1 && Array.isArray(args[0]) ? args[0] : args });
+                return result.rows;
             },
-            run(...args) {
-                const flatArgs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
-                if (client.prepare) {
-                    return client.prepare(sql).run(...flatArgs);
-                } else {
-                    const result = client.executeSync({ sql, args: flatArgs });
-                    return { changes: result.rowsAffected || 0 };
+            async run(...args) {
+                if (!isTurso) {
+                    return client.prepare(sql).run(...args);
                 }
+                const result = await client.execute({ sql, args: args.length === 1 && Array.isArray(args[0]) ? args[0] : args });
+                return { changes: result.rowsAffected || 0 };
             }
         };
     },
-    exec(sql) {
-        if (client.exec) {
+    async exec(sql) {
+        if (!isTurso) {
             client.exec(sql);
         } else {
-            sql.split(';').filter(s => s.trim()).forEach(s => {
-                try { client.executeSync(s.trim()); } catch (e) {}
-            });
+            const statements = sql.split(';').filter(s => s.trim());
+            for (const s of statements) {
+                try { await client.execute(s.trim()); } catch (e) {}
+            }
         }
     },
     pragma(str) {
-        if (client.pragma) client.pragma(str);
+        if (!isTurso && client.pragma) client.pragma(str);
     }
 };
 
@@ -77,17 +73,21 @@ const initSQL = [
     `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`
 ];
 
-initSQL.forEach(sql => { try { db.exec(sql); } catch (e) {} });
-
-// Default admin
-try {
-    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
-    if (!existing) {
-        const hash = bcrypt.hashSync('admin123', 10);
-        db.prepare('INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)').run(uuidv4(), 'admin', hash, 'admin');
-        console.log('[DB] Default admin: admin / admin123');
+(async () => {
+    for (const sql of initSQL) {
+        try { await db.exec(sql); } catch (e) {}
     }
-} catch (e) { console.log('[DB] Admin init error:', e.message); }
+
+    // Default admin
+    try {
+        const existing = await db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
+        if (!existing) {
+            const hash = bcrypt.hashSync('admin123', 10);
+            await db.prepare('INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)').run(uuidv4(), 'admin', hash, 'admin');
+            console.log('[DB] Default admin: admin / admin123');
+        }
+    } catch (e) { console.log('[DB] Admin init error:', e.message); }
+})();
 
 function generateKey() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
