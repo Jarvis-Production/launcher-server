@@ -87,6 +87,16 @@ const initSQL = [
             console.log('[DB] Default admin: admin / admin123');
         }
     } catch (e) { console.log('[DB] Admin init error:', e.message); }
+
+    // Store encryption key if not exists
+    try {
+        const keyRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get('encryption_key');
+        if (!keyRow) {
+            const newKey = crypto.randomBytes(32).toString('hex');
+            await db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('encryption_key', newKey);
+            console.log('[DB] Generated and stored encryption key');
+        }
+    } catch (e) { console.log('[DB] Encryption key init error:', e.message); }
 })();
 
 function generateKey() {

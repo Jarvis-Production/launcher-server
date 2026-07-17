@@ -51,14 +51,14 @@ app.post('/api/client/download-and-encrypt', async (req, res) => {
         
         // Get or generate encryption key
         if (!ENCRYPTION_KEY) {
-            const keyRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get('encryption_key');
+            const keyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('encryption_key');
             if (keyRow && keyRow.value) {
                 ENCRYPTION_KEY = keyRow.value;
                 process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
                 console.log('[Crypto] Loaded encryption key from DB');
             } else {
                 ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
-                await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('encryption_key', ENCRYPTION_KEY);
+                db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('encryption_key', ENCRYPTION_KEY);
                 process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
                 console.log('[Crypto] Generated and stored new encryption key');
             }
@@ -81,14 +81,14 @@ app.post('/api/client/download-and-encrypt', async (req, res) => {
         
         // Store encrypted JAR in DB
         const encryptedBase64 = Buffer.concat([iv, encrypted]).toString('base64');
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_jar', encryptedBase64);
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_jar', encryptedBase64);
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
         
         // Store original checksum for verification
         const originalHash = crypto.createHash('sha256').update(jarData).digest('hex');
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_original_hash', originalHash);
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_original_hash', originalHash);
         
-        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_download_encrypt', `${url} (${jarData.length} bytes)`);
+        db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_download_encrypt', `${url} (${jarData.length} bytes)`);
         
         console.log(`[Client] Encrypted and stored: ${jarData.length} bytes`);
         res.json({ ok: true, size: jarData.length, hash: originalHash });
@@ -115,7 +115,7 @@ app.get('/api/client/download', async (req, res) => {
         }
         
         // Get encrypted JAR from DB
-        const clientRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_jar');
+        const clientRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_jar');
         if (!clientRow || !clientRow.value) {
             return res.status(404).json({ error: 'Client not available' });
         }
@@ -129,7 +129,7 @@ app.get('/api/client/download', async (req, res) => {
         res.send(encryptedData);
         
         console.log(`[Client] Streamed ${encryptedData.length} bytes to user ${user.username}`);
-        await db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('client_download', user.id, `${encryptedData.length} bytes`);
+        db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('client_download', user.id, `${encryptedData.length} bytes`);
     } catch (e) {
         console.error('[Client] Stream error:', e.message);
         res.status(500).json({ error: e.message });
@@ -139,8 +139,8 @@ app.get('/api/client/download', async (req, res) => {
 // ── Get client version ─────────────────────────────────
 app.get('/api/client/version', async (req, res) => {
     try {
-        const versionSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_version');
-        const hashSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_original_hash');
+        const versionSetting = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_version');
+        const hashSetting = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_original_hash');
         res.json({ 
             version: versionSetting?.value || '1.0.0',
             hash: hashSetting?.value || null
