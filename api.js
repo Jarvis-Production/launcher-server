@@ -165,7 +165,7 @@ router.post('/launcher/validate', auth, (req, res) => {
 });
 
 // ── Launcher: Stream client JAR ───────────────────────
-router.get('/launcher/client', (req, res) => {
+router.get('/launcher/client', async (req, res) => {
     try {
         const sessionToken = req.headers['x-session'];
         if (!sessionToken) return res.status(401).json({ error: 'Session required' });
@@ -176,13 +176,34 @@ router.get('/launcher/client', (req, res) => {
         // Update last active
         db.prepare('UPDATE sessions SET last_active = datetime(\'now\') WHERE id = ?').run(session.id);
 
-        // Read client from database (not filesystem — Render wipes files on restart)
+        // Try DB first, then external URL
+        let data = null;
         const clientRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_jar');
-        if (!clientRow || !clientRow.value) {
-            return res.status(404).json({ error: 'Client not uploaded. Upload via admin panel.' });
+        if (clientRow && clientRow.value) {
+            data = Buffer.from(clientRow.value, 'base64');
+        } else {
+            // Try external URL (GitHub release, etc.)
+            const urlRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_url');
+            if (urlRow && urlRow.value) {
+                try {
+                    const http = urlRow.value.startsWith('https') ? require('https') : require('http');
+                    data = await new Promise((resolve, reject) => {
+                        http.get(urlRow.value, (res) => {
+                            const chunks = [];
+                            res.on('data', chunk => chunks.push(chunk));
+                            res.on('end', () => resolve(Buffer.concat(chunks)));
+                            res.on('error', reject);
+                        }).on('error', reject);
+                    });
+                } catch (e) {
+                    return res.status(502).json({ error: 'Failed to download client from external URL' });
+                }
+            }
         }
 
-        const data = Buffer.from(clientRow.value, 'base64');
+        if (!data) {
+            return res.status(404).json({ error: 'Client not uploaded. Upload via admin panel or set download URL.' });
+        }
         const encKey = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
         const iv = crypto.randomBytes(16);
         const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);

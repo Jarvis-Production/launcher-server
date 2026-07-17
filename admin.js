@@ -131,13 +131,27 @@ router.get('/api/logs', adminAuth, (req, res) => {
     }
 });
 
-// ── Admin: Upload client JAR (stored in DB, not filesystem) ──
+// ── Admin: Set client download URL ─────────────────────
+router.post('/api/client/set-url', adminAuth, (req, res) => {
+    try {
+        const { url } = req.body;
+        if (!url) return res.status(400).json({ error: 'URL required' });
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_url', url);
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
+        db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_url_set', url);
+        res.json({ ok: true, url });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Admin: Upload client JAR (stored in DB) ───────────
 router.post('/api/client/upload', adminAuth, upload.single('client'), (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file' });
         const fs = require('fs');
         const jarData = fs.readFileSync(req.file.path);
-        fs.unlinkSync(req.file.path); // cleanup temp
+        fs.unlinkSync(req.file.path);
         db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_jar', jarData.toString('base64'));
         db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
         db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_upload', `version ${req.body.version || '1.0.0'}, size ${jarData.length} bytes`);
