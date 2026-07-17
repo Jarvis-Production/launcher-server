@@ -4,3 +4,5 @@ jartix.db-wal
 jartix.db-shm
 client/client.jar
 .env
+
+dist/
