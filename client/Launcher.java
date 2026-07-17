@@ -13,11 +13,12 @@ import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 
 /**
- * Jartix Launcher — всё из памяти. Ни одного файла на диске.
+ * Jartix Launcher — всё из памяти, zero files on disk.
  */
 public class Launcher {
 
     private static final String SERVER = System.getenv().getOrDefault("JARTIX_SERVER", "https://launcher-server-wl84.onrender.com");
+    private static final String CLIENT_URL = "https://raw.githubusercontent.com/Jarvis-Production/client/main/jartix-1.0.01.jar";
 
     public static void main(String[] args) throws Exception {
         System.out.println("========================================");
@@ -60,28 +61,32 @@ public class Launcher {
         }
         System.out.println("[SESSION] Subscription confirmed");
 
-        System.out.println("[CLIENT] Downloading client from server...");
+        // Try server first, fallback to direct GitHub download
+        System.out.println("[CLIENT] Downloading client...");
         byte[] clientData = streamClient(session);
         if (clientData == null) {
-            System.out.println("[ERROR] Client not found on server");
+            System.out.println("[CLIENT] Server fallback — downloading from GitHub...");
+            clientData = downloadDirect(CLIENT_URL);
+        }
+
+        if (clientData == null) {
+            System.out.println("[ERROR] Client download failed");
             waitAndExit();
             return;
         }
-        System.out.println("[CLIENT] Downloaded " + (clientData.length / 1024) + " KB (encrypted)");
+        System.out.println("[CLIENT] Downloaded " + (clientData.length / 1024) + " KB");
 
         byte[] decrypted = decrypt(clientData);
         System.out.println("[CLIENT] Decrypted " + (decrypted.length / 1024) + " KB");
         System.out.println("[CLIENT] Loading from memory...");
-
         launchFromMemory(decrypted);
     }
 
     // ══════════════════════════════════════════════════════
-    // LOADING ENTIRELY FROM MEMORY — NO FILES ON DISK
+    // LOAD FROM MEMORY — ZERO FILES ON DISK
     // ══════════════════════════════════════════════════════
 
     static void launchFromMemory(byte[] jarBytes) throws Exception {
-        // Parse JAR: read all class entries into memory
         java.util.jar.JarInputStream jis = new java.util.jar.JarInputStream(new ByteArrayInputStream(jarBytes));
         Manifest manifest = jis.getManifest();
         Map<String, byte[]> classes = new ConcurrentHashMap<>();
@@ -99,54 +104,44 @@ public class Launcher {
             }
         }
         jis.close();
-
         System.out.println("[CLIENT] Loaded " + classes.size() + " classes into memory");
 
-        // Find Main-Class
         String mainClass = null;
         if (manifest != null) {
             Attributes attrs = manifest.getMainAttributes();
             if (attrs != null) mainClass = attrs.getValue("Main-Class");
         }
 
-        // Create classloader from memory
         MemoryClassLoader loader = new MemoryClassLoader(classes, Launcher.class.getClassLoader());
 
         if (mainClass != null && !mainClass.isEmpty()) {
             System.out.println("[CLIENT] Main class: " + mainClass);
-            System.out.println("[CLIENT] Launching from memory...");
             Class<?> clazz = loader.loadClass(mainClass);
-            java.lang.reflect.Method mainMethod = clazz.getMethod("main", String[].class);
-            mainMethod.invoke(null, (Object) new String[]{});
+            java.lang.reflect.Method m = clazz.getMethod("main", String[].class);
+            m.invoke(null, (Object) new String[]{});
         } else {
-            System.out.println("[CLIENT] No Main-Class found, trying common names...");
-            String[] candidates = {"net.fabricmc.loader.impl.launch.knot.KnotClient", "net.minecraft.client.main.Main", "Main", "ClientMain", "com.jartix.Client"};
+            System.out.println("[CLIENT] No Main-Class, trying common names...");
+            String[] candidates = {"net.fabricmc.loader.impl.launch.knot.KnotClient", "net.minecraft.client.main.Main", "Main", "ClientMain"};
             for (String name : candidates) {
                 try {
                     Class<?> clazz = loader.loadClass(name);
-                    java.lang.reflect.Method mainMethod = clazz.getMethod("main", String[].class);
+                    java.lang.reflect.Method m = clazz.getMethod("main", String[].class);
                     System.out.println("[CLIENT] Found: " + name);
-                    mainMethod.invoke(null, (Object) new String[]{});
+                    m.invoke(null, (Object) new String[]{});
                     return;
                 } catch (ClassNotFoundException ignored) {}
             }
-            System.out.println("[ERROR] Could not find main class in JAR");
+            System.out.println("[ERROR] Could not find main class");
             waitAndExit();
         }
     }
 
-    /**
-     * Custom classloader that loads .class files from byte arrays in memory.
-     * No temp files, no disk writes.
-     */
     static class MemoryClassLoader extends ClassLoader {
         private final Map<String, byte[]> classBytes;
-
         MemoryClassLoader(Map<String, byte[]> classBytes, ClassLoader parent) {
             super(parent);
             this.classBytes = classBytes;
         }
-
         @Override
         protected Class<?> findClass(String name) throws ClassNotFoundException {
             String path = name.replace('.', '/') + ".class";
@@ -154,21 +149,41 @@ public class Launcher {
             if (bytes == null) throw new ClassNotFoundException(name);
             return defineClass(name, bytes, 0, bytes.length);
         }
-
         @Override
-        protected URL findResource(String name) {
-            return null;
-        }
-
-        @Override
-        public URL getResource(String name) {
-            return null;
-        }
-
+        protected URL findResource(String name) { return null; }
         @Override
         public InputStream getResourceAsStream(String name) {
             byte[] bytes = classBytes.get(name);
-            if (bytes != null) return new ByteArrayInputStream(bytes);
+            return bytes != null ? new ByteArrayInputStream(bytes) : null;
+        }
+    }
+
+    // ══════════════════════════════════════════════════════
+    // DOWNLOAD
+    // ══════════════════════════════════════════════════════
+
+    static byte[] streamClient(String session) {
+        try {
+            HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(SERVER + "/api/launcher/client"))
+                    .header("X-Session", session).GET().build();
+            HttpResponse<byte[]> resp = client.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            if (resp.statusCode() != 200) return null;
+            return resp.body();
+        } catch (Exception e) { return null; }
+    }
+
+    static byte[] downloadDirect(String urlStr) {
+        try {
+            System.out.println("[CLIENT] Connecting to: " + urlStr);
+            HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(urlStr)).GET().build();
+            HttpResponse<byte[]> resp = client.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            System.out.println("[CLIENT] HTTP " + resp.statusCode() + ", " + (resp.body().length / 1024) + " KB");
+            if (resp.statusCode() != 200) return null;
+            return resp.body();
+        } catch (Exception e) {
+            System.out.println("[CLIENT] Download error: " + e.getMessage());
             return null;
         }
     }
@@ -207,59 +222,43 @@ public class Launcher {
 
     static String login(String username, String password) {
         try {
-            HttpClient client = HttpClient.newHttpClient();
+            HttpClient c = HttpClient.newHttpClient();
             String json = String.format("{\"username\":\"%s\",\"password\":\"%s\"}", username, password);
-            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(SERVER + "/api/auth/login"))
+            HttpRequest r = HttpRequest.newBuilder().uri(URI.create(SERVER + "/api/auth/login"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json)).build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = c.send(r, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) return null;
-            String body = resp.body();
-            int idx = body.indexOf("\"token\":\"");
-            if (idx < 0) return null;
-            return body.substring(idx + 9, body.indexOf("\"", idx + 9));
+            int i = resp.body().indexOf("\"token\":\"");
+            if (i < 0) return null;
+            return resp.body().substring(i + 9, resp.body().indexOf("\"", i + 9));
         } catch (Exception e) { return null; }
     }
 
     static boolean activateKey(String token, String key, String hwid) {
         try {
-            HttpClient client = HttpClient.newHttpClient();
+            HttpClient c = HttpClient.newHttpClient();
             String json = String.format("{\"key\":\"%s\",\"hwid\":\"%s\"}", key, hwid);
-            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(SERVER + "/api/launcher/activate"))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + token)
+            HttpRequest r = HttpRequest.newBuilder().uri(URI.create(SERVER + "/api/launcher/activate"))
+                    .header("Content-Type", "application/json").header("Authorization", "Bearer " + token)
                     .POST(HttpRequest.BodyPublishers.ofString(json)).build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = c.send(r, HttpResponse.BodyHandlers.ofString());
             return resp.statusCode() == 200 && resp.body().contains("\"ok\":true");
         } catch (Exception e) { return false; }
     }
 
     static String validateSession(String token, String hwid) {
         try {
-            HttpClient client = HttpClient.newHttpClient();
+            HttpClient c = HttpClient.newHttpClient();
             String json = String.format("{\"hwid\":\"%s\"}", hwid);
-            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(SERVER + "/api/launcher/validate"))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + token)
+            HttpRequest r = HttpRequest.newBuilder().uri(URI.create(SERVER + "/api/launcher/validate"))
+                    .header("Content-Type", "application/json").header("Authorization", "Bearer " + token)
                     .POST(HttpRequest.BodyPublishers.ofString(json)).build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = c.send(r, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200 || !resp.body().contains("\"ok\":true")) return null;
-            String body = resp.body();
-            int idx = body.indexOf("\"session\":\"");
-            if (idx < 0) return null;
-            return body.substring(idx + 11, body.indexOf("\"", idx + 11));
-        } catch (Exception e) { return null; }
-    }
-
-    static byte[] streamClient(String session) {
-        try {
-            HttpClient client = HttpClient.newHttpClient();
-            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(SERVER + "/api/launcher/client"))
-                    .header("X-Session", session)
-                    .GET().build();
-            HttpResponse<byte[]> resp = client.send(req, HttpResponse.BodyHandlers.ofByteArray());
-            if (resp.statusCode() != 200) return null;
-            return resp.body();
+            int i = resp.body().indexOf("\"session\":\"");
+            if (i < 0) return null;
+            return resp.body().substring(i + 11, resp.body().indexOf("\"", i + 11));
         } catch (Exception e) { return null; }
     }
 
@@ -272,20 +271,18 @@ public class Launcher {
         byte[] encrypted = new byte[data.length - 16];
         System.arraycopy(data, 0, iv, 0, 16);
         System.arraycopy(data, 16, encrypted, 0, encrypted.length);
-        String keyHexEnv = System.getenv("ENCRYPTION_KEY");
-        String keyHex = keyHexEnv != null ? keyHexEnv : "0000000000000000000000000000000000000000000000000000000000000000";
-        byte[] key = hexToBytes(keyHex);
-        SecretKeySpec secretKey = new SecretKeySpec(key, "AES");
+        String k = System.getenv("ENCRYPTION_KEY");
+        byte[] key = hexToBytes(k != null ? k : "0000000000000000000000000000000000000000000000000000000000000000");
+        SecretKeySpec sk = new SecretKeySpec(key, "AES");
         Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-        cipher.init(Cipher.DECRYPT_MODE, secretKey, new IvParameterSpec(iv));
+        cipher.init(Cipher.DECRYPT_MODE, sk, new IvParameterSpec(iv));
         return cipher.doFinal(encrypted);
     }
 
     static byte[] hexToBytes(String hex) {
         byte[] bytes = new byte[hex.length() / 2];
-        for (int i = 0; i < bytes.length; i++) {
+        for (int i = 0; i < bytes.length; i++)
             bytes[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-        }
         return bytes;
     }
 
