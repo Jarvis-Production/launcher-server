@@ -13,9 +13,8 @@ const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
-// Encryption key for client JAR (change in production!)
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
-process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
+// Encryption key for client JAR - use env var or generate and store in DB
+let ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
 
 // Initialize WebSocket loader server
 const loaderServer = new LoaderServer(server);
@@ -50,6 +49,21 @@ app.post('/api/client/download-and-encrypt', async (req, res) => {
         const { url } = req.body;
         if (!url) return res.status(400).json({ error: 'URL required' });
         
+        // Get or generate encryption key
+        if (!ENCRYPTION_KEY) {
+            const keyRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get('encryption_key');
+            if (keyRow && keyRow.value) {
+                ENCRYPTION_KEY = keyRow.value;
+                process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
+                console.log('[Crypto] Loaded encryption key from DB');
+            } else {
+                ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
+                await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('encryption_key', ENCRYPTION_KEY);
+                process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
+                console.log('[Crypto] Generated and stored new encryption key');
+            }
+        }
+        
         console.log(`[Client] Downloading from: ${url}`);
         
         // Download JAR from GitHub
@@ -58,6 +72,9 @@ app.post('/api/client/download-and-encrypt', async (req, res) => {
         
         // Encrypt with AES-256-CBC
         const encKey = Buffer.from(ENCRYPTION_KEY, 'hex');
+        if (encKey.length !== 32) {
+            return res.status(500).json({ error: 'Invalid encryption key length' });
+        }
         const iv = crypto.randomBytes(16);
         const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
         const encrypted = Buffer.concat([cipher.update(jarData), cipher.final()]);
@@ -160,7 +177,7 @@ server.listen(PORT, () => {
     console.log(`[Jartix] Server running on port ${PORT}`);
     console.log(`[Jartix] Admin panel: http://localhost:${PORT}/admin`);
     console.log(`[Jartix] WebSocket: ws://localhost:${PORT}/ws/loader`);
-    console.log(`[Jartix] Encryption key: ${ENCRYPTION_KEY.substring(0, 8)}...`);
+    console.log(`[Jartix] Encryption key: ${ENCRYPTION_KEY ? ENCRYPTION_KEY.substring(0, 8) + '...' : 'will be generated'}`);
 });
 
 // Graceful shutdown
