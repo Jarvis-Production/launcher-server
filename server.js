@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 const db = require('./db');
 const api = require('./api');
 const admin = require('./admin');
@@ -42,6 +43,117 @@ app.get('/health', (req, res) => {
         ws: 'ws://localhost:' + PORT + '/ws/loader'
     });
 });
+
+// ── Download and encrypt client JAR from GitHub ────────
+app.post('/api/client/download-and-encrypt', async (req, res) => {
+    try {
+        const { url } = req.body;
+        if (!url) return res.status(400).json({ error: 'URL required' });
+        
+        console.log(`[Client] Downloading from: ${url}`);
+        
+        // Download JAR from GitHub
+        const jarData = await downloadFile(url);
+        console.log(`[Client] Downloaded ${jarData.length} bytes`);
+        
+        // Encrypt with AES-256-CBC
+        const encKey = Buffer.from(ENCRYPTION_KEY, 'hex');
+        const iv = crypto.randomBytes(16);
+        const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
+        const encrypted = Buffer.concat([cipher.update(jarData), cipher.final()]);
+        
+        // Store encrypted JAR in DB
+        const encryptedBase64 = Buffer.concat([iv, encrypted]).toString('base64');
+        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_jar', encryptedBase64);
+        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
+        
+        // Store original checksum for verification
+        const originalHash = crypto.createHash('sha256').update(jarData).digest('hex');
+        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_original_hash', originalHash);
+        
+        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_download_encrypt', `${url} (${jarData.length} bytes)`);
+        
+        console.log(`[Client] Encrypted and stored: ${jarData.length} bytes`);
+        res.json({ ok: true, size: jarData.length, hash: originalHash });
+    } catch (e) {
+        console.error('[Client] Download error:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Stream encrypted client JAR ────────────────────────
+app.get('/api/client/download', async (req, res) => {
+    try {
+        const token = req.headers.authorization?.replace('Bearer ', '');
+        if (!token) return res.status(401).json({ error: 'No token' });
+        
+        // Verify token (simple check)
+        const jwt = require('jsonwebtoken');
+        const JWT_SECRET = process.env.JWT_SECRET || 'jartix-secret-change-in-production';
+        let user;
+        try {
+            user = jwt.verify(token, JWT_SECRET);
+        } catch {
+            return res.status(401).json({ error: 'Invalid token' });
+        }
+        
+        // Get encrypted JAR from DB
+        const clientRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_jar');
+        if (!clientRow || !clientRow.value) {
+            return res.status(404).json({ error: 'Client not available' });
+        }
+        
+        const encryptedData = Buffer.from(clientRow.value, 'base64');
+        
+        // Stream encrypted JAR
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Length', encryptedData.length);
+        res.setHeader('Content-Disposition', 'attachment; filename="client.enc"');
+        res.send(encryptedData);
+        
+        console.log(`[Client] Streamed ${encryptedData.length} bytes to user ${user.username}`);
+        await db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('client_download', user.id, `${encryptedData.length} bytes`);
+    } catch (e) {
+        console.error('[Client] Stream error:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Get client version ─────────────────────────────────
+app.get('/api/client/version', async (req, res) => {
+    try {
+        const versionSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_version');
+        const hashSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_original_hash');
+        res.json({ 
+            version: versionSetting?.value || '1.0.0',
+            hash: hashSetting?.value || null
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Helper: download file from URL
+function downloadFile(url) {
+    return new Promise((resolve, reject) => {
+        const client = url.startsWith('https') ? https : http;
+        client.get(url, (response) => {
+            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                // Follow redirect
+                downloadFile(response.headers.location).then(resolve).catch(reject);
+                return;
+            }
+            if (response.statusCode !== 200) {
+                reject(new Error(`HTTP ${response.statusCode}`));
+                return;
+            }
+            const chunks = [];
+            response.on('data', chunk => chunks.push(chunk));
+            response.on('end', () => resolve(Buffer.concat(chunks)));
+            response.on('error', reject);
+        }).on('error', reject);
+    });
+}
 
 // Start server
 server.listen(PORT, () => {
