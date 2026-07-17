@@ -176,19 +176,29 @@ router.get('/launcher/client', async (req, res) => {
         // Update last active
         db.prepare('UPDATE sessions SET last_active = datetime(\'now\') WHERE id = ?').run(session.id);
 
-        // Try DB first, then external URL
+        // Try DB first, then env var, then external URL
         let data = null;
         const clientRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_jar');
         if (clientRow && clientRow.value) {
             data = Buffer.from(clientRow.value, 'base64');
         } else {
-            // Try external URL (GitHub release, etc.)
-            const urlRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_url');
-            if (urlRow && urlRow.value) {
+            // Try CLIENT_URL env var (persists across Render restarts)
+            const envUrl = process.env.CLIENT_URL;
+            if (envUrl) {
                 try {
-                    const http = urlRow.value.startsWith('https') ? require('https') : require('http');
+                    const http = envUrl.startsWith('https') ? require('https') : require('http');
                     data = await new Promise((resolve, reject) => {
-                        http.get(urlRow.value, (res) => {
+                        http.get(envUrl, (res) => {
+                            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                                // Follow redirect
+                                http.get(res.headers.location, (res2) => {
+                                    const chunks = [];
+                                    res2.on('data', chunk => chunks.push(chunk));
+                                    res2.on('end', () => resolve(Buffer.concat(chunks)));
+                                    res2.on('error', reject);
+                                }).on('error', reject);
+                                return;
+                            }
                             const chunks = [];
                             res.on('data', chunk => chunks.push(chunk));
                             res.on('end', () => resolve(Buffer.concat(chunks)));
@@ -196,13 +206,31 @@ router.get('/launcher/client', async (req, res) => {
                         }).on('error', reject);
                     });
                 } catch (e) {
-                    return res.status(502).json({ error: 'Failed to download client from external URL' });
+                    return res.status(502).json({ error: 'Failed to download client: ' + e.message });
+                }
+            } else {
+                // Try DB URL (might be wiped on restart)
+                const urlRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('client_url');
+                if (urlRow && urlRow.value) {
+                    try {
+                        const http = urlRow.value.startsWith('https') ? require('https') : require('http');
+                        data = await new Promise((resolve, reject) => {
+                            http.get(urlRow.value, (res) => {
+                                const chunks = [];
+                                res.on('data', chunk => chunks.push(chunk));
+                                res.on('end', () => resolve(Buffer.concat(chunks)));
+                                res.on('error', reject);
+                            }).on('error', reject);
+                        });
+                    } catch (e) {
+                        return res.status(502).json({ error: 'Failed to download client' });
+                    }
                 }
             }
         }
 
         if (!data) {
-            return res.status(404).json({ error: 'Client not uploaded. Upload via admin panel or set download URL.' });
+            return res.status(404).json({ error: 'Client not uploaded. Set CLIENT_URL env var or upload via admin.' });
         }
         const encKey = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
         const iv = crypto.randomBytes(16);
