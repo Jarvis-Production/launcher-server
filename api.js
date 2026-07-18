@@ -81,6 +81,24 @@ router.post('/launcher/validate', auth, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Public key check - no auth required
+router.post('/launcher/check', async (req, res) => {
+    try {
+        const { key, hwid } = req.body;
+        if (!key || !hwid) return res.status(400).json({ error: 'Key and HWID required' });
+        const keyRow = await db.prepare('SELECT * FROM keys WHERE key_code = ?').get(key);
+        if (!keyRow) return res.status(404).json({ error: 'Key not found' });
+        if (!keyRow.active) return res.status(403).json({ error: 'Key deactivated' });
+        const hashedHWID = hashHWID(hwid);
+        const sessionId = uuidv4();
+        const sessionToken = crypto.randomBytes(32).toString('hex');
+        await db.prepare('INSERT INTO sessions (id, user_id, hwid, ip, token) VALUES (?, ?, ?, ?, ?)').run(sessionId, keyRow.user_id || null, hashedHWID, req.ip, sessionToken);
+        await db.prepare('INSERT INTO logs (event, hwid, ip, details) VALUES (?, ?, ?, ?)').run('check', hashedHWID, req.ip, key);
+        const displayName = keyRow.key_type === 'admin' ? 'J.P' : 'Player' + Math.floor(Math.random() * 9000 + 1000);
+        res.json({ success: true, token: sessionToken, username: displayName, keyType: keyRow.key_type });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/launcher/client', async (req, res) => {
     try {
         const sessionToken = req.headers['x-session'];
