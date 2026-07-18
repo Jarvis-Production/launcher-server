@@ -68,7 +68,7 @@ const db = {
 const initSQL = [
     `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, hwid TEXT DEFAULT NULL, role TEXT DEFAULT 'user', created_at TEXT DEFAULT (datetime('now')), last_login TEXT)`,
     `CREATE TABLE IF NOT EXISTS keys (id TEXT PRIMARY KEY, key_code TEXT UNIQUE NOT NULL, user_id TEXT DEFAULT NULL, key_type TEXT DEFAULT 'client', duration_days INTEGER DEFAULT 30, hwid TEXT DEFAULT NULL, hwid_limit INTEGER DEFAULT 1, active INTEGER DEFAULT 1, activated_at TEXT DEFAULT NULL, expires_at TEXT DEFAULT NULL, created_at TEXT DEFAULT (datetime('now')), created_by TEXT DEFAULT 'admin')`,
-    `CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, hwid TEXT NOT NULL, ip TEXT, token TEXT UNIQUE NOT NULL, active INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')), last_active TEXT DEFAULT (datetime('now')))`,
+    `CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT, hwid TEXT NOT NULL, ip TEXT, token TEXT UNIQUE NOT NULL, active INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')), last_active TEXT DEFAULT (datetime('now')))`,
     `CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT NOT NULL, user_id TEXT, hwid TEXT, ip TEXT, details TEXT, created_at TEXT DEFAULT (datetime('now')))`,
     `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`
 ];
@@ -77,6 +77,14 @@ const initSQL = [
     for (const sql of initSQL) {
         try { await db.exec(sql); } catch (e) {}
     }
+
+    // Migration: make sessions.user_id nullable for client keys without user accounts
+    try {
+        await db.exec(`CREATE TABLE IF NOT EXISTS sessions_new (id TEXT PRIMARY KEY, user_id TEXT, hwid TEXT NOT NULL, ip TEXT, token TEXT UNIQUE NOT NULL, active INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')), last_active TEXT DEFAULT (datetime('now')))`);
+        await db.exec(`INSERT OR IGNORE INTO sessions_new SELECT * FROM sessions`);
+        await db.exec(`DROP TABLE IF EXISTS sessions`);
+        await db.exec(`ALTER TABLE sessions_new RENAME TO sessions`);
+    } catch (e) {}
 
     // Default admin
     try {

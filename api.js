@@ -128,4 +128,8 @@ router.get('/launcher/version', async (req, res) => {
     res.json({ version: v?.value || '1.0.0' });
 });
 
+router.get('/launcher/config', async (req, res) => {
+    res.json({ encryptionKey: process.env.ENCRYPTION_KEY || '' });
+});
+
 module.exports = router;
