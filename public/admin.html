@@ -306,6 +306,11 @@
         return '<span class="badge badge-green">Активен</span>';
     }
 
+    function isExpired(k) {
+        if (!k.expires_at) return false;
+        return new Date() > new Date(k.expires_at + 'Z');
+    }
+
     function getKeyExpiry(k) {
         if (!k.expires_at) return 'Бессрочно';
         const expires = new Date(k.expires_at + 'Z');
@@ -332,7 +337,7 @@
                     <td style="font-size:11px;">${getKeyExpiry(k)}</td>
                     <td style="font-size:11px;">${k.hwid ? k.hwid.substring(0, 12) + '...' : '-'}</td>
                     <td>${getKeyStatus(k)}</td>
-                    <td>${k.active ? `<button class="action-btn danger" onclick="deactivateKey('${k.id}')">Деакт.</button>` : ''}</td>
+                    <td>${k.active && !isExpired(k) ? `<button class="action-btn danger" onclick="deactivateKey('${k.id}')">Деакт.</button>` : ''}</td>
                 </tr>`;
             }).join('');
         } catch {}
