@@ -197,7 +197,7 @@
         <h3 id="genModalTitle">Генерация ключей</h3>
         <input type="hidden" id="genKeyType" value="client">
         <input type="number" id="genCount" placeholder="Количество" value="5" min="1" max="100">
-        <input type="number" id="genDuration" placeholder="Дней (30)" value="30">
+        <input type="number" id="genDuration" placeholder="Секунд (2592000 = 30 дней)" value="2592000">
         <input type="number" id="genHWIDLimit" placeholder="Лимит HWID (1)" value="1">
         <button onclick="generateKeys()">Сгенерировать</button>
         <div class="key-list" id="genResult" style="display:none;"></div>
@@ -273,6 +273,24 @@
         });
     });
 
+    // ── Duration formatting ─────────────────────────────
+    function formatDuration(seconds) {
+        if (seconds >= 86400) {
+            const days = Math.floor(seconds / 86400);
+            const rem = seconds % 86400;
+            if (rem === 0) return days + 'д';
+            const hrs = Math.floor(rem / 3600);
+            return days + 'д ' + hrs + 'ч';
+        } else if (seconds >= 3600) {
+            const hrs = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            return hrs + 'ч ' + mins + 'м';
+        } else if (seconds >= 60) {
+            return Math.floor(seconds / 60) + 'м ' + (seconds % 60) + 'с';
+        }
+        return seconds + 'с';
+    }
+
     // ── Keys ───────────────────────────────────────────
     async function loadKeys() {
         try {
@@ -287,7 +305,7 @@
                     <td style="font-family:monospace;color:#4a8eff;">${k.key_code}</td>
                     <td>${k.username || '-'}</td>
                     <td>${typeBadge}</td>
-                    <td>${k.duration_days}д</td>
+                    <td>${formatDuration(k.duration_days)}</td>
                     <td style="font-size:11px;">${k.hwid ? k.hwid.substring(0, 12) + '...' : '-'}</td>
                     <td>${k.active ? '<span class="badge badge-green">Активен</span>' : '<span class="badge badge-red">Деактивирован</span>'}</td>
                     <td>${k.active ? `<button class="action-btn danger" onclick="deactivateKey('${k.id}')">Деакт.</button>` : ''}</td>
@@ -307,7 +325,7 @@
 
     async function generateKeys() {
         const count = parseInt(document.getElementById('genCount').value) || 5;
-        const duration = parseInt(document.getElementById('genDuration').value) || 30;
+        const duration = parseInt(document.getElementById('genDuration').value) || 2592000;
         const hwidLimit = parseInt(document.getElementById('genHWIDLimit').value) || 1;
         const keyType = document.getElementById('genKeyType').value || 'client';
         try {

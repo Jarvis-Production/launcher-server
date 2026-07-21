@@ -53,7 +53,8 @@ router.post('/launcher/activate', auth, async (req, res) => {
         if (keyRow.user_id && keyRow.user_id !== req.user.id) return res.status(403).json({ error: 'Key already used by another account' });
         const hashedHWID = hashHWID(hwid);
         if (keyRow.user_id === req.user.id && keyRow.hwid && keyRow.hwid !== hashedHWID) return res.status(403).json({ error: 'HWID mismatch' });
-        const expiresAt = new Date(); expiresAt.setDate(expiresAt.getDate() + keyRow.duration_days);
+        // Calculate expiration (duration_days field now stores seconds)
+        const expiresAt = new Date(Date.now() + keyRow.duration_days * 1000);
         const expiresStr = expiresAt.toISOString().replace('T', ' ').replace('Z', '');
         await db.prepare('UPDATE keys SET user_id = ?, hwid = ?, activated_at = datetime(\'now\'), expires_at = ? WHERE id = ?').run(req.user.id, hashedHWID, expiresStr, keyRow.id);
         await db.prepare('UPDATE users SET hwid = ? WHERE id = ?').run(hashedHWID, req.user.id);
@@ -89,6 +90,12 @@ router.post('/launcher/check', async (req, res) => {
         const keyRow = await db.prepare('SELECT * FROM keys WHERE key_code = ?').get(key);
         if (!keyRow) return res.status(404).json({ error: 'Key not found' });
         if (!keyRow.active) return res.status(403).json({ error: 'Key deactivated' });
+        // Check expiration
+        if (keyRow.expires_at) {
+            const now = new Date();
+            const expires = new Date(keyRow.expires_at + 'Z');
+            if (now > expires) return res.status(403).json({ error: 'Key expired' });
+        }
         const hashedHWID = hashHWID(hwid);
         const sessionId = uuidv4();
         const sessionToken = crypto.randomBytes(32).toString('hex');
