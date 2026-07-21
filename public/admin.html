@@ -197,7 +197,12 @@
         <h3 id="genModalTitle">Генерация ключей</h3>
         <input type="hidden" id="genKeyType" value="client">
         <input type="number" id="genCount" placeholder="Количество" value="5" min="1" max="100">
-        <input type="number" id="genDuration" placeholder="Секунд (2592000 = 30 дней)" value="2592000">
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+            <input type="number" id="genDays" placeholder="Дней" value="0" min="0" style="flex:1;">
+            <input type="number" id="genHours" placeholder="Часов" value="0" min="0" style="flex:1;">
+            <input type="number" id="genMinutes" placeholder="Минут" value="30" min="0" style="flex:1;">
+            <input type="number" id="genSeconds" placeholder="Секунд" value="0" min="0" style="flex:1;">
+        </div>
         <input type="number" id="genHWIDLimit" placeholder="Лимит HWID (1)" value="1">
         <button onclick="generateKeys()">Сгенерировать</button>
         <div class="key-list" id="genResult" style="display:none;"></div>
@@ -291,6 +296,24 @@
         return seconds + 'с';
     }
 
+    function getKeyStatus(k) {
+        if (!k.active) return '<span class="badge badge-red">Деактивирован</span>';
+        if (k.expires_at) {
+            const now = new Date();
+            const expires = new Date(k.expires_at + 'Z');
+            if (now > expires) return '<span class="badge badge-red">Истёк</span>';
+        }
+        return '<span class="badge badge-green">Активен</span>';
+    }
+
+    function getKeyExpiry(k) {
+        if (!k.expires_at) return 'Бессрочно';
+        const expires = new Date(k.expires_at + 'Z');
+        const now = new Date();
+        if (now > expires) return 'Истёк ' + expires.toLocaleString('ru-RU');
+        return 'До ' + expires.toLocaleString('ru-RU');
+    }
+
     // ── Keys ───────────────────────────────────────────
     async function loadKeys() {
         try {
@@ -306,8 +329,9 @@
                     <td>${k.username || '-'}</td>
                     <td>${typeBadge}</td>
                     <td>${formatDuration(k.duration_days)}</td>
+                    <td style="font-size:11px;">${getKeyExpiry(k)}</td>
                     <td style="font-size:11px;">${k.hwid ? k.hwid.substring(0, 12) + '...' : '-'}</td>
-                    <td>${k.active ? '<span class="badge badge-green">Активен</span>' : '<span class="badge badge-red">Деактивирован</span>'}</td>
+                    <td>${getKeyStatus(k)}</td>
                     <td>${k.active ? `<button class="action-btn danger" onclick="deactivateKey('${k.id}')">Деакт.</button>` : ''}</td>
                 </tr>`;
             }).join('');
@@ -325,13 +349,18 @@
 
     async function generateKeys() {
         const count = parseInt(document.getElementById('genCount').value) || 5;
-        const duration = parseInt(document.getElementById('genDuration').value) || 2592000;
+        const days = parseInt(document.getElementById('genDays').value) || 0;
+        const hours = parseInt(document.getElementById('genHours').value) || 0;
+        const minutes = parseInt(document.getElementById('genMinutes').value) || 0;
+        const seconds = parseInt(document.getElementById('genSeconds').value) || 0;
+        const totalSeconds = days * 86400 + hours * 3600 + minutes * 60 + seconds;
+        if (totalSeconds <= 0) { alert('Укажите время жизни ключа'); return; }
         const hwidLimit = parseInt(document.getElementById('genHWIDLimit').value) || 1;
         const keyType = document.getElementById('genKeyType').value || 'client';
         try {
             const r = await api('/admin/api/keys/generate', {
                 method: 'POST',
-                body: JSON.stringify({ count, duration_days: duration, hwid_limit: hwidLimit, key_type: keyType })
+                body: JSON.stringify({ count, duration_days: totalSeconds, hwid_limit: hwidLimit, key_type: keyType })
             });
             const result = document.getElementById('genResult');
             result.style.display = 'block';
