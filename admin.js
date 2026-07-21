@@ -46,15 +46,18 @@ router.get('/api/keys', adminAuth, async (req, res) => {
 
 router.post('/api/keys/generate', adminAuth, async (req, res) => {
     try {
-        const { count = 1, duration_days = 30, hwid_limit = 1, key_type = 'client' } = req.body;
+        const { count = 1, duration_days = 2592000, hwid_limit = 1, key_type = 'client' } = req.body;
         const type = ['admin', 'client'].includes(key_type) ? key_type : 'client';
         const keys = [];
+        // Calculate expiry at creation time (duration_days stores seconds)
+        const expiresDate = new Date(Date.now() + duration_days * 1000);
+        const expiresStr = expiresDate.toISOString().replace('T', ' ').replace('Z', '');
         for (let i = 0; i < Math.min(count, 100); i++) {
             const keyCode = generateKey();
-            await db.prepare('INSERT INTO keys (id, key_code, key_type, duration_days, hwid_limit, created_by) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), keyCode, type, duration_days, hwid_limit, 'admin');
+            await db.prepare('INSERT INTO keys (id, key_code, key_type, duration_days, hwid_limit, created_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(uuidv4(), keyCode, type, duration_days, hwid_limit, 'admin', expiresStr);
             keys.push(keyCode);
         }
-        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('keys_generated', `${count} ${type} keys`);
+        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('keys_generated', `${count} ${type} keys, ${duration_days}s`);
         res.json({ ok: true, keys, keyType: type });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
