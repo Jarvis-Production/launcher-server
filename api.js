@@ -97,6 +97,15 @@ router.post('/launcher/check', async (req, res) => {
             if (now > expires) return res.status(403).json({ error: 'Key expired' });
         }
         const hashedHWID = hashHWID(hwid);
+        // HWID binding: first use binds key to HWID
+        if (!keyRow.hwid) {
+            await db.prepare('UPDATE keys SET hwid = ? WHERE id = ?').run(hashedHWID, keyRow.id);
+        } else if (keyRow.hwid !== hashedHWID) {
+            // HWID mismatch — check hwid_limit for allowed HWIDs
+            const existingBindings = await db.prepare('SELECT COUNT(DISTINCT hwid) as cnt FROM sessions WHERE hwid != ? AND token IN (SELECT token FROM sessions WHERE user_id = ?)').get(hashedHWID, keyRow.user_id);
+            // For simplicity: key is bound to first HWID, reject others
+            return res.status(403).json({ error: 'Key is bound to another device' });
+        }
         const sessionId = uuidv4();
         const sessionToken = crypto.randomBytes(32).toString('hex');
         await db.prepare('INSERT INTO sessions (id, user_id, hwid, ip, token) VALUES (?, ?, ?, ?, ?)').run(sessionId, keyRow.user_id || null, hashedHWID, req.ip, sessionToken);
