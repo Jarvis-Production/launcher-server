@@ -100,6 +100,8 @@ router.get('/api/telemetry', adminAuth, async (req, res) => {
         res.json(rows || []);
     } catch (e) { res.json([]); }
 });
+
+router.post('/api/client/set-url', adminAuth, async (req, res) => {
     try {
         const { url } = req.body;
         if (!url) return res.status(400).json({ error: 'URL required' });
