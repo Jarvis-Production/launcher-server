@@ -144,6 +144,7 @@
         <div class="tabs">
             <button class="tab active" data-tab="keys">Ключи</button>
             <button class="tab" data-tab="users">Пользователи</button>
+            <button class="tab" data-tab="telemetry">Телеметрия</button>
             <button class="tab" data-tab="logs">Логи</button>
             <button class="tab" data-tab="client">Клиент</button>
         </div>
@@ -174,6 +175,23 @@
             <table>
                 <thead><tr><th>Время</th><th>Событие</th><th>User</th><th>HWID</th><th>IP</th><th>Детали</th></tr></thead>
                 <tbody id="logsBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Telemetry -->
+        <div class="section" id="tab-telemetry">
+            <div class="toolbar">
+                <input type="text" id="telemetryFilter" placeholder="Фильтр по серверу..." style="width:200px;">
+                <button onclick="loadTelemetry()">Обновить</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+                <div class="stat-card"><div class="num" id="tTotal">-</div><div class="label">Всего подключений</div></div>
+                <div class="stat-card"><div class="num" id="tUnique">-</div><div class="label">Уникальных HWID</div></div>
+                <div class="stat-card"><div class="num" id="tRecent">-</div><div class="label">За час</div></div>
+            </div>
+            <table>
+                <thead><tr><th>HWID</th><th>Сервер</th><th>IP</th><th>Бренд</th><th>Версия</th><th>Время</th></tr></thead>
+                <tbody id="telemetryBody"></tbody>
             </table>
         </div>
 
@@ -275,6 +293,7 @@
             document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
             t.classList.add('active');
             document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+            if (t.dataset.tab === 'telemetry') loadTelemetry();
         });
     });
 
@@ -423,6 +442,34 @@
                     <td style="font-size:12px;">${l.details || '-'}</td>
                 </tr>
             `).join('');
+        } catch {}
+    }
+
+    // ── Telemetry ───────────────────────────────────────
+    async function loadTelemetry() {
+        try {
+            const filter = document.getElementById('telemetryFilter')?.value || '';
+            const url = filter ? `/admin/api/telemetry?server=${encodeURIComponent(filter)}&limit=200` : '/admin/api/telemetry?limit=200';
+            const data = await api(url);
+
+            document.getElementById('tTotal').textContent = data.length;
+            const unique = new Set(data.map(r => r.hwid));
+            document.getElementById('tUnique').textContent = unique.size;
+            const hourAgo = Date.now() - 3600000;
+            document.getElementById('tRecent').textContent = data.filter(r => r.timestamp > hourAgo).length;
+
+            const tbody = document.getElementById('telemetryBody');
+            tbody.innerHTML = data.map(r => {
+                const time = new Date(r.timestamp).toLocaleString('ru-RU');
+                return `<tr>
+                    <td style="font-size:11px;font-family:monospace;">${r.hwid ? r.hwid.substring(0, 16) + '...' : '-'}</td>
+                    <td>${r.server}</td>
+                    <td style="font-size:12px;">${r.ip || '-'}</td>
+                    <td>${r.brand || '-'}</td>
+                    <td style="font-size:11px;">${r.version || '-'}</td>
+                    <td style="font-size:11px;">${time}</td>
+                </tr>`;
+            }).join('');
         } catch {}
     }
 
