@@ -82,18 +82,6 @@ router.post('/launcher/validate', auth, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Telemetry endpoint - no auth required (called by client mod)
-router.post('/telemetry', async (req, res) => {
-    try {
-        const { hwid, server, ip, brand, version, timestamp } = req.body;
-        if (!hwid || !server) return res.status(400).json({ error: 'hwid and server required' });
-        await db.prepare('INSERT INTO telemetry (hwid, server, ip, brand, version, timestamp) VALUES (?, ?, ?, ?, ?, ?)').run(
-            hwid, server, ip || '', brand || '', version || '', timestamp || Date.now()
-        );
-        res.sendStatus(200);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // Public key check - no auth required
 router.post('/launcher/check', async (req, res) => {
     try {

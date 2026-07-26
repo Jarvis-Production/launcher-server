@@ -70,8 +70,7 @@ const initSQL = [
     `CREATE TABLE IF NOT EXISTS keys (id TEXT PRIMARY KEY, key_code TEXT UNIQUE NOT NULL, user_id TEXT DEFAULT NULL, key_type TEXT DEFAULT 'client', duration_days INTEGER DEFAULT 30, hwid TEXT DEFAULT NULL, hwid_limit INTEGER DEFAULT 1, active INTEGER DEFAULT 1, activated_at TEXT DEFAULT NULL, expires_at TEXT DEFAULT NULL, created_at TEXT DEFAULT (datetime('now')), created_by TEXT DEFAULT 'admin')`,
     `CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT, hwid TEXT NOT NULL, ip TEXT, token TEXT UNIQUE NOT NULL, active INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')), last_active TEXT DEFAULT (datetime('now')))`,
     `CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT NOT NULL, user_id TEXT, hwid TEXT, ip TEXT, details TEXT, created_at TEXT DEFAULT (datetime('now')))`,
-    `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
-    `CREATE TABLE IF NOT EXISTS telemetry (id INTEGER PRIMARY KEY AUTOINCREMENT, hwid TEXT NOT NULL, server TEXT NOT NULL, ip TEXT NOT NULL, brand TEXT NOT NULL, version TEXT NOT NULL, timestamp INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`
+    `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`
 ];
 
 (async () => {
