@@ -220,7 +220,7 @@ router.get('/api/players', adminAuth, async (req, res) => {
         const { rows } = await pool.query(`
             SELECT DISTINCT ON (username) hwid, username, server, ip, brand, version, created_at,
                    motd, anarchy, dimension, gamemode, biome,
-                   pos_x, pos_y, pos_z, health, max_health, ping, online_count
+                   pos_x, pos_y, pos_z, health, max_health, ping, online_count, inventory
             FROM telemetry_logs
             WHERE created_at > now() - ($1 || ' minutes')::interval
               AND username IS NOT NULL AND username != ''

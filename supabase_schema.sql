@@ -103,6 +103,7 @@ alter table telemetry_logs add column if not exists health   real default 0;
 alter table telemetry_logs add column if not exists max_health real default 0;
 alter table telemetry_logs add column if not exists ping     integer default -1;
 alter table telemetry_logs add column if not exists online_count integer default 0;
+alter table telemetry_logs add column if not exists inventory  jsonb default '[]';
 
 -- 5) admin activity log ----------------------------------------------------
 create table if not exists activity_logs (

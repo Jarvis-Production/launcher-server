@@ -410,29 +410,100 @@ async function detailModal(id){closeMenus();
      </div></div>`;
   }catch(e){toast(e.message,'err');}}
 
+/* ---------- inventory items map ---------- */
+const MC_ITEMS={};
+const ITEM_COLORS={
+  'diamond':'#4af','gold':'#fc0','iron':'#bbb','netherite':'#555','emerald':'#2d2',
+  'sword':'#f55','axe':'#a74','pickaxe':'#999','shovel':'#876','bow':'#a63',
+  'crossbow':'#a63','trident':'#4cf','shield':'#88c','armor':'#ddd','helmet':'#ddd',
+  'chestplate':'#ddd','leggings':'#ddd','boots':'#ddd','elytra':'#c8f',
+  'ender_pearl':'#3d3','ender_eye':'#3d3','shulker':'#a3f','chest':'#a84',
+  'obsidian':'#333','tnt':'#f33','totem':'#fd3','potion':'#f3f',
+  'enchanted':'#5f5','book':'#a84','enchant':'#5f5',
+  'coal':'#333','redstone':'#f00','lapis':'#33f','diamond_block':'#4af',
+};
+function getItemColor(id){
+  if(!id)return'#888';
+  const l=id.toLowerCase();
+  for(const[k,c]of Object.entries(ITEM_COLORS))if(l.includes(k))return c;
+  if(l.includes('diamond'))return'#4af';if(l.includes('netherite'))return'#555';
+  if(l.includes('gold'))return'#fc0';if(l.includes('iron'))return'#bbb';
+  if(l.includes('wood'))return'#a84';if(l.includes('stone'))return'#999';
+  if(l.includes('bed'))return'#f6a';if(l.includes('wool'))return'#eee';
+  return'#888';
+}
+function shortName(id){
+  if(!id)return'?';
+  const p=id.split(':');const n=(p[1]||p[0]||'').replace(/_/g,' ');
+  return n.length>14?n.substring(0,12)+'..':n;
+}
+
 /* ---------- players ---------- */
 async function loadPlayers(){
   const body=document.getElementById('playersBody');
   try{const list=await api('/players');
     if(!list.length){body.innerHTML='<div class="empty">Сейчас никого нет в игре</div>';return;}
-    body.innerHTML='<div class="players">'+list.map(p=>`
+    body.innerHTML='<div class="players">'+list.map(p=>{
+      let invHtml='';
+      try{
+        const items=typeof p.inventory==='string'?JSON.parse(p.inventory):(p.inventory||[]);
+        if(items.length){
+          const slots=new Map();
+          items.forEach(i=>{slots.set(i.s,i);});
+          // Armor row
+          let armorRow='<div style="display:flex;gap:3px;margin-top:8px">';
+          [39,38,37,36].forEach(s=>{
+            const it=slots.get(s);
+            if(it)armorRow+=`<div title="${esc(shortName(it.id))} x${it.c}" style="width:28px;height:28px;background:${getItemColor(it.id)}22;border:1px solid ${getItemColor(it.id)}66;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:${getItemColor(it.id)};cursor:help">${esc(shortName(it.id).substring(0,3))}</div>`;
+            else armorRow+=`<div style="width:28px;height:28px;background:#11111822;border:1px solid #ffffff08;border-radius:4px"></div>`;
+          });
+          // Offhand
+          const oh=slots.get(40);
+          if(oh)armorRow+=`<div title="${esc(shortName(oh.id))} x${oh.c}" style="width:28px;height:28px;background:${getItemColor(oh.id)}22;border:1px solid ${getItemColor(oh.id)}66;border-radius:4px;margin-left:8px;display:flex;align-items:center;justify-content:center;font-size:9px;color:${getItemColor(oh.id)};cursor:help">${esc(shortName(oh.id).substring(0,3))}</div>`;
+          armorRow+='</div>';
+          invHtml+=armorRow;
+          // Hotbar
+          let hotbar='<div style="display:flex;gap:3px;margin-top:5px">';
+          for(let i=0;i<9;i++){
+            const it=slots.get(i);
+            if(it)hotbar+=`<div title="${esc(shortName(it.id))} x${it.c}" style="width:28px;height:28px;background:${getItemColor(it.id)}22;border:1px solid ${getItemColor(it.id)}66;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:${getItemColor(it.id)};cursor:help;overflow:hidden;text-overflow:ellipsis">${esc(shortName(it.id).substring(0,4))}</div>`;
+            else hotbar+=`<div style="width:28px;height:28px;background:#11111822;border:1px solid #ffffff08;border-radius:4px"></div>`;
+          }
+          hotbar+='</div>';
+          invHtml+=hotbar;
+          // Main inventory (3 rows)
+          for(let row=0;row<3;row++){
+            let invRow='<div style="display:flex;gap:3px;margin-top:3px">';
+            for(let col=0;col<9;col++){
+              const s=9+row*9+col;
+              const it=slots.get(s);
+              if(it)invRow+=`<div title="${esc(shortName(it.id))} x${it.c}" style="width:28px;height:28px;background:${getItemColor(it.id)}22;border:1px solid ${getItemColor(it.id)}66;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:${getItemColor(it.id)};cursor:help;overflow:hidden;text-overflow:ellipsis">${esc(shortName(it.id).substring(0,4))}</div>`;
+              else invRow+=`<div style="width:28px;height:28px;background:#11111822;border:1px solid #ffffff08;border-radius:4px"></div>`;
+            }
+            invRow+='</div>';
+            invHtml+=invRow;
+          }
+        }
+      }catch(ex){}
+      return `
       <div class="player">
         <div class="ph"><span class="pn">${esc(p.username||'—')}</span><span class="badge b-ok"><span class="dot"></span>онлайн</span></div>
         <div class="row"><span>Сервер</span><span class="server-tag">${esc(p.server||'—')}</span></div>
         ${p.anarchy?'<div class="row"><span>Анархия</span><b style="color:#ffb347">'+esc(p.anarchy)+'</b></div>':''}
         <div class="row"><span>IP сервера</span><b>${esc(p.ip||'—')}</b></div>
-        <div class="row"><span>MOTD</span><span class="muted" style="font-size:11px">${esc(p.motd||'—')}</span></div>
         <div class="row"><span>Измерение</span><b>${esc(p.dimension||'—')}</b></div>
         <div class="row"><span>Биом</span><span class="muted">${esc(p.biome||'—')}</span></div>
         <div class="row"><span>Гейммод</span><b>${esc(p.gamemode||'—')}</b></div>
         <div class="row"><span>Координаты</span><b>${p.pos_x||0}, ${p.pos_y||0}, ${p.pos_z||0}</b></div>
         <div class="row"><span>Здоровье</span><b>${p.health||0}/${p.max_health||0}</b></div>
         <div class="row"><span>Пинг</span><b>${p.ping>=0?p.ping+' мс':'—'}</b></div>
-        <div class="row"><span>Онлайн на сервере</span><b>${p.online_count||0}</b></div>
+        <div class="row"><span>Онлайн</span><b>${p.online_count||0}</b></div>
         <div class="row"><span>Версия</span><b>${esc(p.version||'—')}</b></div>
         <div class="row"><span>Клиент</span><b>${esc(p.brand||'Jartix')}</b></div>
         <div class="row"><span>Активность</span><b>${ago(p.created_at)}</b></div>
-      </div>`).join('')+'</div>';
+        ${invHtml?'<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)"><div style="font-size:11px;color:var(--dim);margin-bottom:4px">ИНВЕНТАРЬ</div>'+invHtml+'</div>':''}
+      </div>`;
+    }).join('')+'</div>';
   }catch(e){body.innerHTML='<div class="empty">'+esc(e.message)+'</div>';}
 }
 

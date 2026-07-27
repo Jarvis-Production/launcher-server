@@ -148,7 +148,7 @@ router.post('/telemetry', async (req, res) => {
     try {
         const { hwid, username, server, ip, brand, version, timestamp,
                 motd, anarchy, dimension, gamemode, biome,
-                x, y, z, health, maxHealth, ping, online } = req.body || {};
+                x, y, z, health, maxHealth, ping, online, inv } = req.body || {};
         if (!hwid) return res.sendStatus(400);
         // Use client-provided username, fallback to profile lookup
         let name = username || null;
@@ -159,15 +159,16 @@ router.post('/telemetry', async (req, res) => {
                 name = m ? m.username : null;
             } catch {}
         }
+        const invJson = JSON.stringify(inv || []);
         await pool.query(
             `INSERT INTO telemetry_logs
              (hwid, username, server, ip, brand, version, event, timestamp,
               motd, anarchy, dimension, gamemode, biome,
-              pos_x, pos_y, pos_z, health, max_health, ping, online_count)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+              pos_x, pos_y, pos_z, health, max_health, ping, online_count, inventory)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
             [hwid, name, server || '', ip || '', brand || '', version || '', 'server', timestamp || Date.now(),
              motd || '', anarchy || '', dimension || '', gamemode || '', biome || '',
-             x || 0, y || 0, z || 0, health || 0, maxHealth || 0, ping || -1, online || 0]
+             x || 0, y || 0, z || 0, health || 0, maxHealth || 0, ping || -1, online || 0, invJson]
         );
         res.sendStatus(200);
     } catch (e) { console.error('[telemetry]', e.message); res.sendStatus(500); }
