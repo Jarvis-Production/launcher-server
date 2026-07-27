@@ -411,17 +411,15 @@ async function detailModal(id){closeMenus();
      </div></div>`;
   }catch(e){toast(e.message,'err');}}
 
-/* ---------- inventory items ---------- */
 function getItemIcon(id) {
   if(!id) return '';
   const name = id.replace('minecraft:', '').replace(/\//g, '_');
-  // Try multiple CDN sources for compatibility
   return `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/1.21/assets/minecraft/textures/item/${name}.png`;
 }
 
 function getItemDisplayName(item) {
   if(!item) return '?';
-  if(item.name) return item.name; // Real name from game (Russian if game is Russian)
+  if(item.name) return item.name;
   const id = (item.id || '').replace('minecraft:', '').replace(/_/g, ' ');
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
@@ -439,9 +437,25 @@ function renderSlot(item, large) {
   const name = getItemDisplayName(item);
   const isEnch = isEnchanted(item);
   const count = item.c > 1 ? item.c : '';
-  const iconUrl = getItemIcon(item.id);
+  const cdnUrl = getItemIcon(item.id);
   
-  // Enchantment glint
+  // Use game icon if available, otherwise CDN
+  let iconHtml = '';
+  if(item.icon) {
+    // Parse game icon: "W:H:base64data"
+    const parts = item.icon.split(':');
+    if(parts.length >= 3) {
+      const w = parseInt(parts[0]);
+      const h = parseInt(parts[1]);
+      const b64 = parts[2];
+      iconHtml = `<img src="data:image/png;base64,${b64}" style="width:${size-8}px;height:${size-8}px;image-rendering:pixelated" onerror="this.src='${cdnUrl}';this.onerror=null" />`;
+    }
+  }
+  if(!iconHtml) {
+    iconHtml = `<img src="${cdnUrl}" style="width:${size-8}px;height:${size-8}px;image-rendering:pixelated" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" onload="this.nextElementSibling.style.display='none'" />`;
+  }
+  
+  // Enchantment glow
   const enchStyle = isEnch ? `
     background: linear-gradient(135deg, #8b5cf655, #06b6d455, #8b5cf655);
     border-color: #8b5cf688;
@@ -457,7 +471,7 @@ function renderSlot(item, large) {
     durBar = `<div style="position:absolute;bottom:1px;left:2px;right:2px;height:2px;background:#333;border-radius:1px"><div style="height:100%;width:${pct*100}%;background:${color};border-radius:1px"></div></div>`;
   }
   
-  // Tooltip with full info
+  // Tooltip
   let tooltip = esc(item.id || '');
   if(item.name) tooltip += '\\n' + esc(item.name);
   if(item.c > 1) tooltip += '\\nКоличество: ' + item.c;
@@ -466,9 +480,7 @@ function renderSlot(item, large) {
   
   return `<div title="${tooltip}" 
     style="width:${size}px;height:${size}px;background:#1a1a2e;border:1px solid ${isEnch ? '#8b5cf688' : '#ffffff11'};border-radius:6px;position:relative;display:flex;align-items:center;justify-content:center;cursor:help;overflow:hidden;${enchStyle}">
-    <img src="${iconUrl}" style="width:${size-8}px;height:${size-8}px;image-rendering:pixelated" 
-      onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" 
-      onload="this.nextElementSibling.style.display='none'" />
+    ${iconHtml}
     <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:${fontSize}px;color:var(--txt);text-align:center;padding:2px">${esc(name.substring(0,8))}</div>
     ${count ? `<div style="position:absolute;bottom:1px;right:3px;font-size:9px;color:#fff;font-weight:700;text-shadow:1px 1px 2px #000">${count}</div>` : ''}
     ${durBar}
