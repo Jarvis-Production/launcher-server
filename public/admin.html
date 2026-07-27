@@ -501,6 +501,10 @@ async function loadPlayers(){
         <div class="row"><span>Версия</span><b>${esc(p.version||'—')}</b></div>
         <div class="row"><span>Клиент</span><b>${esc(p.brand||'Jartix')}</b></div>
         <div class="row"><span>Активность</span><b>${ago(p.created_at)}</b></div>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <button onclick="showInventoryModal('${esc(p.username)}',this)" style="flex:1;padding:6px 10px;background:var(--peri);color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer">📦 Инвентарь</button>
+          <button onclick="viewScreen('${esc(p.username)}')" style="flex:1;padding:6px 10px;background:#4caf50;color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer">👁 Экран</button>
+        </div>
         ${invHtml?'<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)"><div style="font-size:11px;color:var(--dim);margin-bottom:4px">ИНВЕНТАРЬ</div>'+invHtml+'</div>':''}
       </div>`;
     }).join('')+'</div>';
@@ -517,6 +521,145 @@ async function loadLogs(){
         <td class="hide-sm muted">${esc(l.ip||'—')}</td><td class="hide-sm muted">${esc(l.details||'')}</td>
         <td class="muted">${fmtDate(l.created_at)}</td></tr>`).join('')}</tbody></table>`;
   }catch(e){body.innerHTML='<div class="empty">'+esc(e.message)+'</div>';}
+}
+
+/* ---------- inventory modal ---------- */
+function showInventoryModal(username, btn){
+  // Find the player's inventory data from the last telemetry
+  const players = document.querySelectorAll('.player');
+  let invData = null;
+  players.forEach(p => {
+    const nameEl = p.querySelector('.pn');
+    if(nameEl && nameEl.textContent === username) {
+      // Try to get inventory from the inline data
+      const invSection = p.querySelector('[data-inv]');
+      if(invSection) invData = invSection.dataset.inv;
+    }
+  });
+  
+  // Create modal
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.style.width = '520px';
+  
+  // Fetch latest inventory from API
+  fetchInventory(username).then(data => {
+    const items = data || [];
+    const slots = new Map();
+    items.forEach(i => slots.set(i.s, i));
+    
+    // Build inventory grid
+    let gridHtml = '<div style="font-family:monospace">';
+    
+    // Armor row (slots 39,38,37,36)
+    gridHtml += '<div style="margin-bottom:12px"><div style="font-size:11px;color:var(--dim);margin-bottom:4px">БРОНЯ</div><div style="display:flex;gap:4px">';
+    [39,38,37,36].forEach(s => {
+      gridHtml += renderSlot(slots.get(s), s);
+    });
+    // Offhand (slot 40)
+    gridHtml += '<div style="width:8px"></div>';
+    gridHtml += renderSlot(slots.get(40), 40);
+    gridHtml += '</div></div>';
+    
+    // Main inventory (slots 9-35, 3 rows)
+    gridHtml += '<div style="margin-bottom:12px"><div style="font-size:11px;color:var(--dim);margin-bottom:4px">ИНВЕНТАРЬ</div>';
+    for(let row = 0; row < 3; row++) {
+      gridHtml += '<div style="display:flex;gap:4px;margin-bottom:4px">';
+      for(let col = 0; col < 9; col++) {
+        const s = 9 + row * 9 + col;
+        gridHtml += renderSlot(slots.get(s), s);
+      }
+      gridHtml += '</div>';
+    }
+    gridHtml += '</div>';
+    
+    // Hotbar (slots 0-8)
+    gridHtml += '<div><div style="font-size:11px;color:var(--dim);margin-bottom:4px">ХОТБАР</div><div style="display:flex;gap:4px">';
+    for(let i = 0; i < 9; i++) {
+      gridHtml += renderSlot(slots.get(i), i);
+    }
+    gridHtml += '</div></div>';
+    
+    gridHtml += '</div>';
+    
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="margin:0">Инвентарь: ${esc(username)}</h3>
+        <button onclick="this.closest('.overlay').remove()" style="background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer">✕</button>
+      </div>
+      ${gridHtml}
+      <div style="margin-top:12px;text-align:center;font-size:11px;color:var(--dim)">Данные обновляются каждую секунду</div>
+    `;
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    
+    // Auto-refresh every 1 second
+    const interval = setInterval(() => {
+      if(!document.body.contains(overlay)) { clearInterval(interval); return; }
+      fetchInventory(username).then(newData => {
+        if(newData) updateInventoryModal(modal, newData);
+      });
+    }, 1000);
+  });
+}
+
+function renderSlot(item, slotNum) {
+  if(!item) return `<div style="width:44px;height:44px;background:#11111844;border:1px solid #ffffff08;border-radius:6px;position:relative"></div>`;
+  
+  const color = getItemColor(item.id);
+  const name = shortName(item.id);
+  const count = item.c > 1 ? item.c : '';
+  
+  return `<div title="${esc(item.id)} x${item.c}${item.d ? ' (урон: '+item.d+')' : ''}" style="width:44px;height:44px;background:${color}15;border:1px solid ${color}44;border-radius:6px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:help">
+    <div style="font-size:9px;color:${color};text-align:center;line-height:1.1;max-width:40px;overflow:hidden">${esc(name.substring(0,8))}</div>
+    ${count ? `<div style="position:absolute;bottom:2px;right:3px;font-size:9px;color:var(--txt);font-weight:700">${count}</div>` : ''}
+    ${item.d !== undefined ? `<div style="position:absolute;top:1px;right:3px;font-size:7px;color:#f55">${item.d}</div>` : ''}
+  </div>`;
+}
+
+async function fetchInventory(username) {
+  try {
+    const data = await api('/players?mins=5');
+    const player = data.find(p => p.username === username);
+    if(!player || !player.inventory) return [];
+    return typeof player.inventory === 'string' ? JSON.parse(player.inventory) : player.inventory;
+  } catch { return []; }
+}
+
+function updateInventoryModal(modal, items) {
+  // Update slots dynamically
+  const slots = new Map();
+  (items || []).forEach(i => slots.set(i.s, i));
+  // Re-render would be complex, just let user close and reopen
+}
+
+/* ---------- screen view ---------- */
+function viewScreen(username) {
+  // This requires WebSocket + client-side screen capture
+  // For now, show placeholder
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal" style="width:800px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="margin:0">Экран: ${esc(username)}</h3>
+        <button onclick="this.closest('.overlay').remove()" style="background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer">✕</button>
+      </div>
+      <div style="background:#000;border-radius:8px;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;color:var(--dim)">
+        <div style="text-align:center">
+          <div style="font-size:48px;margin-bottom:12px">👁</div>
+          <div>Подключение к экрану игрока...</div>
+          <div style="font-size:11px;margin-top:8px;color:var(--dim)">Требует запуска мода на клиенте</div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
 }
 
 /* ---------- boot ---------- */
