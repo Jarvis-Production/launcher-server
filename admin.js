@@ -87,6 +87,20 @@ router.get('/api/logs', adminAuth, async (req, res) => {
     catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/api/telemetry', adminAuth, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+        const srv = req.query.server;
+        let rows;
+        if (srv) {
+            rows = await db.prepare('SELECT * FROM telemetry WHERE server LIKE ? OR ip LIKE ? ORDER BY timestamp DESC LIMIT ?').all('%' + srv + '%', '%' + srv + '%', limit);
+        } else {
+            rows = await db.prepare('SELECT * FROM telemetry ORDER BY timestamp DESC LIMIT ?').all(limit);
+        }
+        res.json(rows || []);
+    } catch (e) { res.json([]); }
+});
+
 router.post('/api/client/set-url', adminAuth, async (req, res) => {
     try {
         const { url } = req.body;

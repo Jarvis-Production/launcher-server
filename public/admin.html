@@ -146,6 +146,7 @@
             <button class="tab" data-tab="users">Пользователи</button>
             <button class="tab" data-tab="logs">Логи</button>
             <button class="tab" data-tab="client">Клиент</button>
+            <button class="tab" data-tab="telemetry">Телеметрия</button>
         </div>
 
         <!-- Keys -->
@@ -186,6 +187,18 @@
                 <input type="text" id="clientVersion" placeholder="Версия (1.0.0)" value="1.0.0" style="margin-top:8px;">
                 <button onclick="uploadClient()" style="margin-top:12px;">Загрузить</button>
             </div>
+        </div>
+
+        <!-- Telemetry -->
+        <div class="section" id="tab-telemetry">
+            <div class="toolbar">
+                <input type="text" id="telemetryFilter" placeholder="Фильтр по серверу..." style="width:250px;">
+                <button onclick="loadTelemetry()">Обновить</button>
+            </div>
+            <table>
+                <thead><tr><th>Время</th><th>HWID</th><th>Игрок</th><th>Сервер</th><th>IP</th><th>Бренд</th><th>Версия</th></tr></thead>
+                <tbody id="telemetryBody"></tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -275,6 +288,8 @@
             document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
             t.classList.add('active');
             document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+            if (t.dataset.tab === 'telemetry') loadTelemetry();
+            if (t.dataset.tab === 'logs') loadLogs();
         });
     });
 
@@ -423,6 +438,29 @@
                     <td style="font-size:12px;">${l.details || '-'}</td>
                 </tr>
             `).join('');
+        } catch {}
+    }
+
+    // ── Telemetry ─────────────────────────────────────
+    async function loadTelemetry() {
+        try {
+            const filter = document.getElementById('telemetryFilter').value;
+            const url = filter ? `/admin/api/telemetry?limit=200&server=${encodeURIComponent(filter)}` : '/admin/api/telemetry?limit=200';
+            const rows = await api(url);
+            const tbody = document.getElementById('telemetryBody');
+            tbody.innerHTML = rows.map(r => {
+                const t = new Date(r.timestamp);
+                const time = t.toLocaleString('ru-RU');
+                return `<tr>
+                    <td style="font-size:11px;">${time}</td>
+                    <td style="font-size:11px;font-family:monospace;">${r.hwid ? r.hwid.substring(0, 12) + '...' : '-'}</td>
+                    <td style="font-size:12px;">${r.username || '-'}</td>
+                    <td style="font-size:12px;">${r.server || '-'}</td>
+                    <td style="font-size:12px;">${r.ip || '-'}</td>
+                    <td style="font-size:12px;">${r.brand || '-'}</td>
+                    <td style="font-size:12px;">${r.version || '-'}</td>
+                </tr>`;
+            }).join('');
         } catch {}
     }
 

@@ -139,4 +139,16 @@ router.get('/launcher/config', async (req, res) => {
     res.json({ encryptionKey: process.env.ENCRYPTION_KEY || '' });
 });
 
+// Telemetry — client sends data on server join (no auth)
+router.post('/telemetry', async (req, res) => {
+    try {
+        const { hwid, username, server, ip, brand, version, timestamp } = req.body;
+        if (!hwid) return res.status(400).json({ error: 'hwid required' });
+        await db.prepare('INSERT INTO telemetry (hwid, username, server, ip, brand, version, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+            hwid, username || '', server || '', ip || '', brand || '', version || '', timestamp || Date.now()
+        );
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
