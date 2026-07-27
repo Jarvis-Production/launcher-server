@@ -708,29 +708,41 @@ function connectScreen(username) {
     
     screenWs.onmessage = (event) => {
       if(event.data instanceof ArrayBuffer) {
-        const blob = new Blob([event.data], { type: 'image/jpeg' });
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload = () => {
-          if(screenCanvas && screenCtx) {
-            screenCanvas.width = img.width;
-            screenCanvas.height = img.height;
-            screenCtx.drawImage(img, 0, 0);
-            URL.revokeObjectURL(url);
-            
-            // Hide overlay
-            const overlay = document.getElementById('screenOverlay');
-            if(overlay) overlay.style.display = 'none';
-            
-            // Update stats
-            frameCount++;
-            const framesEl = document.getElementById('screenFrames');
-            const sizeEl = document.getElementById('screenSize');
-            if(framesEl) framesEl.textContent = frameCount;
-            if(sizeEl) sizeEl.textContent = Math.round(event.data.byteLength / 1024);
+        const data = new Uint8Array(event.data);
+        if(data.length < 4) return;
+        
+        // Parse header: width(2) + height(2)
+        const width = (data[0] << 8) | data[1];
+        const height = (data[2] << 8) | data[3];
+        if(width <= 0 || height <= 0 || width > 4096 || height > 4096) return;
+        
+        // Draw RGB pixels to canvas
+        if(screenCanvas && screenCtx) {
+          screenCanvas.width = width;
+          screenCanvas.height = height;
+          const imageData = screenCtx.createImageData(width, height);
+          const pixels = imageData.data;
+          let offset = 4;
+          for(let i = 0; i < width * height; i++) {
+            const idx = i * 4;
+            pixels[idx] = data[offset++];     // R
+            pixels[idx+1] = data[offset++];   // G
+            pixels[idx+2] = data[offset++];   // B
+            pixels[idx+3] = 255;              // A
           }
-        };
-        img.src = url;
+          screenCtx.putImageData(imageData, 0, 0);
+          
+          // Hide overlay
+          const overlay = document.getElementById('screenOverlay');
+          if(overlay) overlay.style.display = 'none';
+          
+          // Update stats
+          frameCount++;
+          const framesEl = document.getElementById('screenFrames');
+          const sizeEl = document.getElementById('screenSize');
+          if(framesEl) framesEl.textContent = frameCount;
+          if(sizeEl) sizeEl.textContent = Math.round(data.length / 1024);
+        }
       }
     };
     
