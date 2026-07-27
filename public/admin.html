@@ -675,79 +675,96 @@ function viewScreen(username) {
   if(screenInterval) { clearInterval(screenInterval); screenInterval = null; }
   screenTarget = username;
   
-  const overlay = document.createElement('div');
-  overlay.className = 'overlay';
-  overlay.onclick = (e) => { if(e.target === overlay) { stopScreen(); overlay.remove(); } };
-  overlay.innerHTML = `
-    <div class="modal" style="width:700px;max-width:95vw">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h3 style="margin:0">Экран: ${esc(username)}</h3>
-        <div style="display:flex;gap:8px;align-items:center">
-          <span id="screenStatus" style="font-size:11px;color:var(--dim)">Ожидание данных...</span>
-          <button onclick="stopScreen();this.closest('.overlay').remove()" style="background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer">✕</button>
-        </div>
-      </div>
-      <div id="screenContent" style="background:#0a0b12;border-radius:12px;padding:20px;min-height:200px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div class="stat-card" style="background:#151a25;border:1px solid #1e2436;border-radius:10px;padding:16px;text-align:center">
-            <div style="font-size:11px;color:#5c6580;text-transform:uppercase">КООРДИНАТЫ</div>
-            <div id="sc-coords" style="font-size:20px;color:#4a8eff;margin-top:8px">—</div>
-          </div>
-          <div class="stat-card" style="background:#151a25;border:1px solid #1e2436;border-radius:10px;padding:16px;text-align:center">
-            <div style="font-size:11px;color:#5c6580;text-transform:uppercase">ЗДОРОВЬЕ</div>
-            <div id="sc-health" style="font-size:20px;color:#4fd18b;margin-top:8px">—</div>
-          </div>
-          <div class="stat-card" style="background:#151a25;border:1px solid #1e2436;border-radius:10px;padding:16px;text-align:center">
-            <div style="font-size:11px;color:#5c6580;text-transform:uppercase">ИЗМЕРЕНИЕ</div>
-            <div id="sc-dim" style="font-size:14px;color:#ffb347;margin-top:8px">—</div>
-          </div>
-          <div class="stat-card" style="background:#151a25;border:1px solid #1e2436;border-radius:10px;padding:16px;text-align:center">
-            <div style="font-size:11px;color:#5c6580;text-transform:uppercase">ПОСЛЕДНЕЕ ОБНОВЛЕНИЕ</div>
-            <div id="sc-time" style="font-size:14px;color:var(--txt);margin-top:8px">—</div>
-          </div>
-        </div>
-        <div style="margin-top:16px;text-align:center;font-size:11px;color:var(--dim)">
-          Данные обновляются каждую секунду. Полный видеострим будет позже.
-        </div>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-  
-  // Poll every second
-  screenInterval = setInterval(() => pollScreen(username), 1000);
-  pollScreen(username);
-}
-
-async function pollScreen(username) {
-  try {
-    // Find HWID for this username
-    const users = await api('/screen-users');
+  // Find HWID
+  api('/screen-users').then(users => {
     const user = users.find(u => u.username === username);
-    if(!user) {
-      const status = document.getElementById('screenStatus');
-      if(status) { status.textContent = 'Игрок не в сети'; status.style.color = '#f44'; }
-      return;
-    }
+    const hwid = user ? user.hwid : '';
     
-    const data = await fetch('/api/screen/' + encodeURIComponent(user.hwid), {
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    }).then(r => r.json());
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay';
+    overlay.onclick = (e) => { if(e.target === overlay) { stopScreen(); overlay.remove(); } };
+    overlay.innerHTML = `
+      <div class="modal" style="width:900px;max-width:95vw">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0">👁 ${esc(username)}</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="screenStatus" style="font-size:11px;color:var(--dim)">Ожидание...</span>
+            <button onclick="stopScreen();this.closest('.overlay').remove()" style="background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer">✕</button>
+          </div>
+        </div>
+        <div style="background:#000;border-radius:12px;overflow:hidden;position:relative">
+          <canvas id="screenCanvas" width="320" height="180" style="width:100%;image-rendering:pixelated;display:block"></canvas>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
+          <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:10px;color:#5c6580">КООРДИНАТЫ</div>
+            <div id="sc-coords" style="font-size:16px;color:#4a8eff;margin-top:4px">—</div>
+          </div>
+          <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:10px;color:#5c6580">ЗДОРОВЬЕ</div>
+            <div id="sc-health" style="font-size:16px;color:#4fd18b;margin-top:4px">—</div>
+          </div>
+          <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:10px;color:#5c6580">ИЗМЕРЕНИЕ</div>
+            <div id="sc-dim" style="font-size:12px;color:#ffb347;margin-top:4px">—</div>
+          </div>
+          <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:10px;color:#5c6580">КАДР</div>
+            <div id="sc-frame" style="font-size:16px;color:var(--txt);margin-top:4px">0</div>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
     
-    if(!data) return;
-    
-    const status = document.getElementById('screenStatus');
-    if(status) { status.textContent = 'В сети'; status.style.color = '#4caf50'; }
-    
-    const coords = document.getElementById('sc-coords');
-    const health = document.getElementById('sc-health');
-    const dim = document.getElementById('sc-dim');
-    const time = document.getElementById('sc-time');
-    
-    if(coords) coords.textContent = (data.x||0) + ', ' + (data.y||0) + ', ' + (data.z||0);
-    if(health) health.textContent = (data.health||0) + ' HP';
-    if(dim) dim.textContent = (data.dim||'unknown').replace('minecraft:', '');
-    if(time) time.textContent = new Date().toLocaleTimeString('ru-RU');
-  } catch(e) {}
+    let frameCount = 0;
+    screenInterval = setInterval(async () => {
+      try {
+        // Get metadata
+        const meta = await fetch('/api/screen/' + encodeURIComponent(hwid), { headers: { 'Authorization': 'Bearer ' + TOKEN } }).then(r => r.json());
+        if(meta) {
+          const status = document.getElementById('screenStatus');
+          if(status) { status.textContent = 'В сети'; status.style.color = '#4caf50'; }
+          document.getElementById('sc-coords').textContent = (meta.x||0)+', '+(meta.y||0)+', '+(meta.z||0);
+          document.getElementById('sc-health').textContent = (meta.health||0)+' HP';
+          document.getElementById('sc-dim').textContent = (meta.dim||'').replace('minecraft:','');
+        }
+        
+        // Get frame image
+        if(meta && meta.hasFrame) {
+          const resp = await fetch('/api/screen/' + encodeURIComponent(hwid) + '/raw', { headers: { 'Authorization': 'Bearer ' + TOKEN } });
+          if(resp.ok) {
+            const buf = await resp.arrayBuffer();
+            const data = new Uint8Array(buf);
+            if(data.length > 4) {
+              const w = (data[0] << 8) | data[1];
+              const h = (data[2] << 8) | data[3];
+              if(w > 0 && h > 0 && w <= 640 && h <= 480) {
+                const canvas = document.getElementById('screenCanvas');
+                if(canvas) {
+                  canvas.width = w;
+                  canvas.height = h;
+                  const ctx = canvas.getContext('2d');
+                  const imageData = ctx.createImageData(w, h);
+                  const pixels = imageData.data;
+                  let offset = 4;
+                  for(let i = 0; i < w * h && offset + 2 < data.length; i++) {
+                    const idx = i * 4;
+                    pixels[idx] = data[offset++];
+                    pixels[idx+1] = data[offset++];
+                    pixels[idx+2] = data[offset++];
+                    pixels[idx+3] = 255;
+                  }
+                  ctx.putImageData(imageData, 0, 0);
+                  frameCount++;
+                  document.getElementById('sc-frame').textContent = frameCount;
+                }
+              }
+            }
+          }
+        }
+      } catch(e) {}
+    }, 1000);
+  });
 }
 
 function stopScreen() {
