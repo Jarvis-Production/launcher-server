@@ -146,19 +146,21 @@ router.post('/launcher/check', async (req, res) => {
 // Telemetry ingest — the in-game cheat reports which server the player joined.
 router.post('/telemetry', async (req, res) => {
     try {
-        const { hwid, server, ip, brand, version, timestamp } = req.body || {};
+        const { hwid, username, server, ip, brand, version, timestamp } = req.body || {};
         if (!hwid) return res.sendStatus(400);
-        // best-effort: attach the username by matching the stored (hashed) HWID
-        let username = null;
-        try {
-            const m = await one('SELECT username FROM profiles WHERE hwid = $1 OR hwid = $2 LIMIT 1',
-                [hwid, hashHWID(hwid)]);
-            username = m ? m.username : null;
-        } catch {}
+        // Use client-provided username, fallback to profile lookup
+        let name = username || null;
+        if (!name) {
+            try {
+                const m = await one('SELECT username FROM profiles WHERE hwid = $1 OR hwid = $2 LIMIT 1',
+                    [hwid, hashHWID(hwid)]);
+                name = m ? m.username : null;
+            } catch {}
+        }
         await pool.query(
             `INSERT INTO telemetry_logs (hwid, username, server, ip, brand, version, event, timestamp)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-            [hwid, username, server || '', ip || '', brand || '', version || '', 'server', timestamp || Date.now()]
+            [hwid, name, server || '', ip || '', brand || '', version || '', 'server', timestamp || Date.now()]
         );
         res.sendStatus(200);
     } catch (e) { console.error('[telemetry]', e.message); res.sendStatus(500); }
