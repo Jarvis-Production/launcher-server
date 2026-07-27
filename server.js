@@ -165,7 +165,68 @@ server.listen(PORT, () => {
     console.log(`[Jartix] Server running on port ${PORT}`);
     console.log(`[Jartix] Admin panel: http://localhost:${PORT}/admin`);
     console.log(`[Jartix] WebSocket: ws://localhost:${PORT}/ws/loader`);
+    console.log(`[Jartix] Screen stream: ws://localhost:${PORT}/ws/screen`);
     console.log(`[Jartix] Encryption key: ${ENCRYPTION_KEY ? ENCRYPTION_KEY.substring(0, 8) + '...' : 'will be loaded from DB'}`);
+});
+
+// ── Screen streaming WebSocket ──────────────────────────
+const WebSocket = require('ws');
+const screenWss = new WebSocket.Server({ noServer: true });
+
+// Store last frame per username
+const screenFrames = new Map();
+// Store admin viewers
+const screenViewers = new Set();
+
+screenWss.on('connection', (ws, req) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const role = url.searchParams.get('role'); // 'client' or 'admin'
+    const username = url.searchParams.get('user') || 'unknown';
+
+    if (role === 'admin') {
+        screenViewers.add(ws);
+        ws.on('close', () => screenViewers.delete(ws));
+        ws.on('message', (data) => {
+            // Admin requests to watch specific user
+            try {
+                const msg = JSON.parse(data);
+                if (msg.type === 'watch') ws.watchUser = msg.user;
+            } catch {}
+        });
+    } else {
+        // Client sending frames
+        ws.on('message', (data) => {
+            screenFrames.set(username, { frame: data, time: Date.now() });
+            // Forward to watching admins
+            screenViewers.forEach(admin => {
+                if (admin.watchUser === username && admin.readyState === WebSocket.OPEN) {
+                    admin.send(data);
+                }
+            });
+        });
+        ws.on('close', () => {
+            screenFrames.delete(username);
+        });
+    }
+});
+
+// Upgrade WebSocket connections on /ws/screen path
+server.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+    if (pathname === '/ws/screen') {
+        screenWss.handleUpgrade(request, socket, head, (ws) => {
+            screenWss.emit('connection', ws, request);
+        });
+    }
+});
+
+// API: get list of users with active screen streams
+app.get('/api/screen-users', (req, res) => {
+    const users = [];
+    screenFrames.forEach((val, key) => {
+        if (Date.now() - val.time < 10000) users.push(key); // Active in last 10s
+    });
+    res.json(users);
 });
 
 // ── Keep-alive self-ping (prevents Render free-tier from sleeping) ──

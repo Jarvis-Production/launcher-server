@@ -639,27 +639,114 @@ function updateInventoryModal(modal, items) {
 }
 
 /* ---------- screen view ---------- */
+let screenWs = null;
+let screenCanvas = null;
+let screenCtx = null;
+
 function viewScreen(username) {
-  // This requires WebSocket + client-side screen capture
-  // For now, show placeholder
+  // Close existing connection
+  if(screenWs) { try { screenWs.close(); } catch {} screenWs = null; }
+  
   const overlay = document.createElement('div');
   overlay.className = 'overlay';
-  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  overlay.onclick = (e) => { if(e.target === overlay) { stopScreen(); overlay.remove(); } };
   overlay.innerHTML = `
-    <div class="modal" style="width:800px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div class="modal" style="width:900px;max-width:95vw">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h3 style="margin:0">Экран: ${esc(username)}</h3>
-        <button onclick="this.closest('.overlay').remove()" style="background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer">✕</button>
-      </div>
-      <div style="background:#000;border-radius:8px;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;color:var(--dim)">
-        <div style="text-align:center">
-          <div style="font-size:48px;margin-bottom:12px">👁</div>
-          <div>Подключение к экрану игрока...</div>
-          <div style="font-size:11px;margin-top:8px;color:var(--dim)">Требует запуска мода на клиенте</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="screenStatus" style="font-size:11px;color:var(--dim)">Подключение...</span>
+          <button onclick="stopScreen();this.closest('.overlay').remove()" style="background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer">✕</button>
         </div>
+      </div>
+      <div style="background:#000;border-radius:8px;overflow:hidden;position:relative">
+        <canvas id="screenCanvas" width="854" height="480" style="width:100%;display:block;background:#000"></canvas>
+        <div id="screenOverlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);background:rgba(0,0,0,0.7)">
+          <div style="text-align:center">
+            <div style="font-size:48px;margin-bottom:12px">👁</div>
+            <div>Ожидание подключения клиента...</div>
+            <div style="font-size:11px;margin-top:8px">${esc(username)} должен быть в игре с модом</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;justify-content:space-between;font-size:11px;color:var(--dim)">
+        <span>Кадров: <span id="screenFrames">0</span></span>
+        <span>Размер: <span id="screenSize">0</span>KB</span>
       </div>
     </div>`;
   document.body.appendChild(overlay);
+  
+  screenCanvas = document.getElementById('screenCanvas');
+  screenCtx = screenCanvas.getContext('2d');
+  
+  // Connect to WebSocket
+  connectScreen(username);
+}
+
+function connectScreen(username) {
+  const wsUrl = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsHost = location.host;
+  
+  try {
+    screenWs = new WebSocket(`${wsUrl}//${wsHost}/ws/screen?role=admin&user=${encodeURIComponent(username)}`);
+    screenWs.binaryType = 'arraybuffer';
+    
+    let frameCount = 0;
+    
+    screenWs.onopen = () => {
+      const status = document.getElementById('screenStatus');
+      if(status) { status.textContent = 'Подключено'; status.style.color = '#4caf50'; }
+      // Tell server which user to watch
+      screenWs.send(JSON.stringify({ type: 'watch', user: username }));
+    };
+    
+    screenWs.onmessage = (event) => {
+      if(event.data instanceof ArrayBuffer) {
+        const blob = new Blob([event.data], { type: 'image/jpeg' });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          if(screenCanvas && screenCtx) {
+            screenCanvas.width = img.width;
+            screenCanvas.height = img.height;
+            screenCtx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(url);
+            
+            // Hide overlay
+            const overlay = document.getElementById('screenOverlay');
+            if(overlay) overlay.style.display = 'none';
+            
+            // Update stats
+            frameCount++;
+            const framesEl = document.getElementById('screenFrames');
+            const sizeEl = document.getElementById('screenSize');
+            if(framesEl) framesEl.textContent = frameCount;
+            if(sizeEl) sizeEl.textContent = Math.round(event.data.byteLength / 1024);
+          }
+        };
+        img.src = url;
+      }
+    };
+    
+    screenWs.onerror = () => {
+      const status = document.getElementById('screenStatus');
+      if(status) { status.textContent = 'Ошибка подключения'; status.style.color = '#f44'; }
+    };
+    
+    screenWs.onclose = () => {
+      const status = document.getElementById('screenStatus');
+      if(status) { status.textContent = 'Отключено'; status.style.color = 'var(--dim)'; }
+    };
+  } catch(e) {
+    const status = document.getElementById('screenStatus');
+    if(status) { status.textContent = 'Ошибка: ' + e.message; status.style.color = '#f44'; }
+  }
+}
+
+function stopScreen() {
+  if(screenWs) { try { screenWs.close(); } catch {} screenWs = null; }
+  screenCanvas = null;
+  screenCtx = null;
 }
 
 /* ---------- boot ---------- */
