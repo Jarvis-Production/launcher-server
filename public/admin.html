@@ -675,96 +675,98 @@ function viewScreen(username) {
   if(screenInterval) { clearInterval(screenInterval); screenInterval = null; }
   screenTarget = username;
   
-  // Find HWID
-  api('/screen-users').then(users => {
-    const user = users.find(u => u.username === username);
-    const hwid = user ? user.hwid : '';
-    
-    const overlay = document.createElement('div');
-    overlay.className = 'overlay';
-    overlay.onclick = (e) => { if(e.target === overlay) { stopScreen(); overlay.remove(); } };
-    overlay.innerHTML = `
-      <div class="modal" style="width:900px;max-width:95vw">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h3 style="margin:0">👁 ${esc(username)}</h3>
-          <div style="display:flex;gap:8px;align-items:center">
-            <span id="screenStatus" style="font-size:11px;color:var(--dim)">Ожидание...</span>
-            <button onclick="stopScreen();this.closest('.overlay').remove()" style="background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer">✕</button>
-          </div>
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if(e.target === overlay) { stopScreen(); overlay.remove(); } };
+  overlay.innerHTML = `
+    <div class="modal" style="width:900px;max-width:95vw">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin:0">👁 ${esc(username)}</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="screenStatus" style="font-size:11px;color:var(--dim)">Ожидание...</span>
+          <button onclick="stopScreen();this.closest('.overlay').remove()" style="background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer">✕</button>
         </div>
-        <div style="background:#000;border-radius:12px;overflow:hidden;position:relative">
-          <canvas id="screenCanvas" width="320" height="180" style="width:100%;image-rendering:pixelated;display:block"></canvas>
+      </div>
+      <div style="background:#000;border-radius:12px;overflow:hidden;position:relative">
+        <canvas id="screenCanvas" width="320" height="180" style="width:100%;image-rendering:pixelated;display:block"></canvas>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
+        <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:#5c6580">КООРДИНАТЫ</div>
+          <div id="sc-coords" style="font-size:16px;color:#4a8eff;margin-top:4px">—</div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
-          <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:10px;color:#5c6580">КООРДИНАТЫ</div>
-            <div id="sc-coords" style="font-size:16px;color:#4a8eff;margin-top:4px">—</div>
-          </div>
-          <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:10px;color:#5c6580">ЗДОРОВЬЕ</div>
-            <div id="sc-health" style="font-size:16px;color:#4fd18b;margin-top:4px">—</div>
-          </div>
-          <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:10px;color:#5c6580">ИЗМЕРЕНИЕ</div>
-            <div id="sc-dim" style="font-size:12px;color:#ffb347;margin-top:4px">—</div>
-          </div>
-          <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:10px;color:#5c6580">КАДР</div>
-            <div id="sc-frame" style="font-size:16px;color:var(--txt);margin-top:4px">0</div>
-          </div>
+        <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:#5c6580">ЗДОРОВЬЕ</div>
+          <div id="sc-health" style="font-size:16px;color:#4fd18b;margin-top:4px">—</div>
         </div>
-      </div>`;
-    document.body.appendChild(overlay);
-    
-    let frameCount = 0;
-    screenInterval = setInterval(async () => {
+        <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:#5c6580">ИЗМЕРЕНИЕ</div>
+          <div id="sc-dim" style="font-size:12px;color:#ffb347;margin-top:4px">—</div>
+        </div>
+        <div style="background:#151a25;border:1px solid #1e2436;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:#5c6580">КАДР</div>
+          <div id="sc-frame" style="font-size:16px;color:var(--txt);margin-top:4px">0</div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  
+  let frameCount = 0;
+  screenInterval = setInterval(async () => {
+    try {
+      // Get all active users and find our target
+      const users = await fetch('/api/screen-users', { headers: { 'Authorization': 'Bearer ' + TOKEN } }).then(r => r.json());
+      const user = (users || []).find(u => u.username === username);
+      if(!user) {
+        document.getElementById('screenStatus').textContent = 'Не в сети';
+        document.getElementById('screenStatus').style.color = '#f44';
+        return;
+      }
+      
+      document.getElementById('screenStatus').textContent = 'В сети';
+      document.getElementById('screenStatus').style.color = '#4caf50';
+      
+      // Get frame
+      const resp = await fetch('/api/screen/' + encodeURIComponent(user.hwid) + '/raw', { headers: { 'Authorization': 'Bearer ' + TOKEN } });
+      if(!resp.ok) return;
+      const buf = await resp.arrayBuffer();
+      const data = new Uint8Array(buf);
+      if(data.length <= 4) return;
+      
+      const w = (data[0] << 8) | data[1];
+      const h = (data[2] << 8) | data[3];
+      if(w <= 0 || h <= 0 || w > 640 || h > 480) return;
+      
+      const canvas = document.getElementById('screenCanvas');
+      if(!canvas) return;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      const imageData = ctx.createImageData(w, h);
+      const pixels = imageData.data;
+      let offset = 4;
+      for(let i = 0; i < w * h && offset + 2 < data.length; i++) {
+        pixels[i*4] = data[offset++];
+        pixels[i*4+1] = data[offset++];
+        pixels[i*4+2] = data[offset++];
+        pixels[i*4+3] = 255;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      frameCount++;
+      document.getElementById('sc-frame').textContent = frameCount;
+      
+      // Parse metadata from end of buffer
       try {
-        // Get metadata
-        const meta = await fetch('/api/screen/' + encodeURIComponent(hwid), { headers: { 'Authorization': 'Bearer ' + TOKEN } }).then(r => r.json());
-        if(meta) {
-          const status = document.getElementById('screenStatus');
-          if(status) { status.textContent = 'В сети'; status.style.color = '#4caf50'; }
-          document.getElementById('sc-coords').textContent = (meta.x||0)+', '+(meta.y||0)+', '+(meta.z||0);
-          document.getElementById('sc-health').textContent = (meta.health||0)+' HP';
-          document.getElementById('sc-dim').textContent = (meta.dim||'').replace('minecraft:','');
+        const str = new TextDecoder().decode(data.slice(Math.max(0, data.length - 200)));
+        const parts = str.split('|');
+        if(parts.length >= 8) {
+          document.getElementById('sc-coords').textContent = parts[4]+', '+parts[5]+', '+parts[6];
+          document.getElementById('sc-health').textContent = parts[7]+' HP';
+          document.getElementById('sc-dim').textContent = (parts[3]||'').replace('minecraft:','');
         }
-        
-        // Get frame image
-        if(meta && meta.hasFrame) {
-          const resp = await fetch('/api/screen/' + encodeURIComponent(hwid) + '/raw', { headers: { 'Authorization': 'Bearer ' + TOKEN } });
-          if(resp.ok) {
-            const buf = await resp.arrayBuffer();
-            const data = new Uint8Array(buf);
-            if(data.length > 4) {
-              const w = (data[0] << 8) | data[1];
-              const h = (data[2] << 8) | data[3];
-              if(w > 0 && h > 0 && w <= 640 && h <= 480) {
-                const canvas = document.getElementById('screenCanvas');
-                if(canvas) {
-                  canvas.width = w;
-                  canvas.height = h;
-                  const ctx = canvas.getContext('2d');
-                  const imageData = ctx.createImageData(w, h);
-                  const pixels = imageData.data;
-                  let offset = 4;
-                  for(let i = 0; i < w * h && offset + 2 < data.length; i++) {
-                    const idx = i * 4;
-                    pixels[idx] = data[offset++];
-                    pixels[idx+1] = data[offset++];
-                    pixels[idx+2] = data[offset++];
-                    pixels[idx+3] = 255;
-                  }
-                  ctx.putImageData(imageData, 0, 0);
-                  frameCount++;
-                  document.getElementById('sc-frame').textContent = frameCount;
-                }
-              }
-            }
-          }
-        }
-      } catch(e) {}
-    }, 1000);
-  });
+      } catch {}
+    } catch(e) {}
+  }, 1000);
 }
 
 function stopScreen() {
