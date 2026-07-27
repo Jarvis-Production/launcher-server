@@ -267,8 +267,9 @@ function ago(d){if(!d)return '—';const s=(Date.now()-new Date(d))/1000;if(s<60
 
 /* ---------- auth ---------- */
 async function doLogin(e){e.preventDefault();const err=document.getElementById('loginErr');err.textContent='';
+  const username=document.getElementById('u').value;const password=document.getElementById('p').value;
   try{const d=await(await fetch(API+'/login',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username:u.value,password:p.value})})).json();
+    body:JSON.stringify({username,password})})).json();
     if(!d.token)throw new Error(d.error||'Ошибка входа');
     TOKEN=d.token;localStorage.setItem('jx_admin',TOKEN);showApp();
   }catch(ex){err.textContent=ex.message}}
