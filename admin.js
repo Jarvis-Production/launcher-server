@@ -222,9 +222,9 @@ router.get('/api/players', adminAuth, async (req, res) => {
                    motd, anarchy, dimension, gamemode, biome,
                    pos_x, pos_y, pos_z, health, max_health, ping, online_count, inventory
             FROM telemetry_logs
-            WHERE created_at > now() - ($1 || ' minutes')::interval
+            WHERE created_at > now() - INTERVAL '30 seconds'
               AND username IS NOT NULL AND username != ''
-            ORDER BY username, created_at DESC`, [String(mins)]);
+            ORDER BY username, created_at DESC`, []);
         res.json(rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
