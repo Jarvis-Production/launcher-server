@@ -277,7 +277,7 @@ function switchTab(t){
   document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
   ['users','players','logs'].forEach(x=>document.getElementById('tab-'+x).classList.toggle('hidden',x!==t));
   clearInterval(playersTimer);
-  if(t==='players'){loadPlayers();playersTimer=setInterval(loadPlayers,10000);}
+  if(t==='players'){loadPlayers();playersTimer=setInterval(loadPlayers,2000);}
   if(t==='logs')loadLogs();
 }
 function refreshAll(){loadStats();loadUsers();}
