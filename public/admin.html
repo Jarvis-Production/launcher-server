@@ -668,126 +668,91 @@ function updateInventoryModal(modal, items) {
 }
 
 /* ---------- screen view ---------- */
-let screenWs = null;
-let screenCanvas = null;
-let screenCtx = null;
+let screenInterval = null;
+let screenTarget = '';
 
 function viewScreen(username) {
-  // Close existing connection
-  if(screenWs) { try { screenWs.close(); } catch {} screenWs = null; }
+  if(screenInterval) { clearInterval(screenInterval); screenInterval = null; }
+  screenTarget = username;
   
   const overlay = document.createElement('div');
   overlay.className = 'overlay';
   overlay.onclick = (e) => { if(e.target === overlay) { stopScreen(); overlay.remove(); } };
   overlay.innerHTML = `
-    <div class="modal" style="width:900px;max-width:95vw">
+    <div class="modal" style="width:700px;max-width:95vw">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h3 style="margin:0">Экран: ${esc(username)}</h3>
         <div style="display:flex;gap:8px;align-items:center">
-          <span id="screenStatus" style="font-size:11px;color:var(--dim)">Подключение...</span>
+          <span id="screenStatus" style="font-size:11px;color:var(--dim)">Ожидание данных...</span>
           <button onclick="stopScreen();this.closest('.overlay').remove()" style="background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer">✕</button>
         </div>
       </div>
-      <div style="background:#000;border-radius:8px;overflow:hidden;position:relative">
-        <canvas id="screenCanvas" width="854" height="480" style="width:100%;display:block;background:#000"></canvas>
-        <div id="screenOverlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);background:rgba(0,0,0,0.7)">
-          <div style="text-align:center">
-            <div style="font-size:48px;margin-bottom:12px">👁</div>
-            <div>Ожидание подключения клиента...</div>
-            <div style="font-size:11px;margin-top:8px">${esc(username)} должен быть в игре с модом</div>
+      <div id="screenContent" style="background:#0a0b12;border-radius:12px;padding:20px;min-height:200px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="stat-card" style="background:#151a25;border:1px solid #1e2436;border-radius:10px;padding:16px;text-align:center">
+            <div style="font-size:11px;color:#5c6580;text-transform:uppercase">КООРДИНАТЫ</div>
+            <div id="sc-coords" style="font-size:20px;color:#4a8eff;margin-top:8px">—</div>
+          </div>
+          <div class="stat-card" style="background:#151a25;border:1px solid #1e2436;border-radius:10px;padding:16px;text-align:center">
+            <div style="font-size:11px;color:#5c6580;text-transform:uppercase">ЗДОРОВЬЕ</div>
+            <div id="sc-health" style="font-size:20px;color:#4fd18b;margin-top:8px">—</div>
+          </div>
+          <div class="stat-card" style="background:#151a25;border:1px solid #1e2436;border-radius:10px;padding:16px;text-align:center">
+            <div style="font-size:11px;color:#5c6580;text-transform:uppercase">ИЗМЕРЕНИЕ</div>
+            <div id="sc-dim" style="font-size:14px;color:#ffb347;margin-top:8px">—</div>
+          </div>
+          <div class="stat-card" style="background:#151a25;border:1px solid #1e2436;border-radius:10px;padding:16px;text-align:center">
+            <div style="font-size:11px;color:#5c6580;text-transform:uppercase">ПОСЛЕДНЕЕ ОБНОВЛЕНИЕ</div>
+            <div id="sc-time" style="font-size:14px;color:var(--txt);margin-top:8px">—</div>
           </div>
         </div>
-      </div>
-      <div style="margin-top:8px;display:flex;justify-content:space-between;font-size:11px;color:var(--dim)">
-        <span>Кадров: <span id="screenFrames">0</span></span>
-        <span>Размер: <span id="screenSize">0</span>KB</span>
+        <div style="margin-top:16px;text-align:center;font-size:11px;color:var(--dim)">
+          Данные обновляются каждую секунду. Полный видеострим будет позже.
+        </div>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   
-  screenCanvas = document.getElementById('screenCanvas');
-  screenCtx = screenCanvas.getContext('2d');
-  
-  // Connect to WebSocket
-  connectScreen(username);
+  // Poll every second
+  screenInterval = setInterval(() => pollScreen(username), 1000);
+  pollScreen(username);
 }
 
-function connectScreen(username) {
-  const wsUrl = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsHost = location.host;
-  
+async function pollScreen(username) {
   try {
-    screenWs = new WebSocket(`${wsUrl}//${wsHost}/ws/screen?role=admin&user=${encodeURIComponent(username)}`);
-    screenWs.binaryType = 'arraybuffer';
-    
-    let frameCount = 0;
-    
-    screenWs.onopen = () => {
+    // Find HWID for this username
+    const users = await api('/screen-users');
+    const user = users.find(u => u.username === username);
+    if(!user) {
       const status = document.getElementById('screenStatus');
-      if(status) { status.textContent = 'Подключено'; status.style.color = '#4caf50'; }
-      // Tell server which user to watch
-      screenWs.send(JSON.stringify({ type: 'watch', user: username }));
-    };
+      if(status) { status.textContent = 'Игрок не в сети'; status.style.color = '#f44'; }
+      return;
+    }
     
-    screenWs.onmessage = (event) => {
-      if(event.data instanceof ArrayBuffer) {
-        const data = new Uint8Array(event.data);
-        if(data.length < 4) return;
-        
-        // Parse header: width(2) + height(2)
-        const width = (data[0] << 8) | data[1];
-        const height = (data[2] << 8) | data[3];
-        if(width <= 0 || height <= 0 || width > 4096 || height > 4096) return;
-        
-        // Draw RGB pixels to canvas
-        if(screenCanvas && screenCtx) {
-          screenCanvas.width = width;
-          screenCanvas.height = height;
-          const imageData = screenCtx.createImageData(width, height);
-          const pixels = imageData.data;
-          let offset = 4;
-          for(let i = 0; i < width * height; i++) {
-            const idx = i * 4;
-            pixels[idx] = data[offset++];     // R
-            pixels[idx+1] = data[offset++];   // G
-            pixels[idx+2] = data[offset++];   // B
-            pixels[idx+3] = 255;              // A
-          }
-          screenCtx.putImageData(imageData, 0, 0);
-          
-          // Hide overlay
-          const overlay = document.getElementById('screenOverlay');
-          if(overlay) overlay.style.display = 'none';
-          
-          // Update stats
-          frameCount++;
-          const framesEl = document.getElementById('screenFrames');
-          const sizeEl = document.getElementById('screenSize');
-          if(framesEl) framesEl.textContent = frameCount;
-          if(sizeEl) sizeEl.textContent = Math.round(data.length / 1024);
-        }
-      }
-    };
+    const data = await fetch('/api/screen/' + encodeURIComponent(user.hwid), {
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    }).then(r => r.json());
     
-    screenWs.onerror = () => {
-      const status = document.getElementById('screenStatus');
-      if(status) { status.textContent = 'Ошибка подключения'; status.style.color = '#f44'; }
-    };
+    if(!data) return;
     
-    screenWs.onclose = () => {
-      const status = document.getElementById('screenStatus');
-      if(status) { status.textContent = 'Отключено'; status.style.color = 'var(--dim)'; }
-    };
-  } catch(e) {
     const status = document.getElementById('screenStatus');
-    if(status) { status.textContent = 'Ошибка: ' + e.message; status.style.color = '#f44'; }
-  }
+    if(status) { status.textContent = 'В сети'; status.style.color = '#4caf50'; }
+    
+    const coords = document.getElementById('sc-coords');
+    const health = document.getElementById('sc-health');
+    const dim = document.getElementById('sc-dim');
+    const time = document.getElementById('sc-time');
+    
+    if(coords) coords.textContent = (data.x||0) + ', ' + (data.y||0) + ', ' + (data.z||0);
+    if(health) health.textContent = (data.health||0) + ' HP';
+    if(dim) dim.textContent = (data.dim||'unknown').replace('minecraft:', '');
+    if(time) time.textContent = new Date().toLocaleTimeString('ru-RU');
+  } catch(e) {}
 }
 
 function stopScreen() {
-  if(screenWs) { try { screenWs.close(); } catch {} screenWs = null; }
-  screenCanvas = null;
-  screenCtx = null;
+  if(screenInterval) { clearInterval(screenInterval); screenInterval = null; }
+  screenTarget = '';
 }
 
 /* ---------- boot ---------- */
