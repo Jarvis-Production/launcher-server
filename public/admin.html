@@ -410,32 +410,60 @@ async function detailModal(id){closeMenus();
      </div></div>`;
   }catch(e){toast(e.message,'err');}}
 
-/* ---------- inventory items map ---------- */
-const MC_ITEMS={};
-const ITEM_COLORS={
-  'diamond':'#4af','gold':'#fc0','iron':'#bbb','netherite':'#555','emerald':'#2d2',
-  'sword':'#f55','axe':'#a74','pickaxe':'#999','shovel':'#876','bow':'#a63',
-  'crossbow':'#a63','trident':'#4cf','shield':'#88c','armor':'#ddd','helmet':'#ddd',
-  'chestplate':'#ddd','leggings':'#ddd','boots':'#ddd','elytra':'#c8f',
-  'ender_pearl':'#3d3','ender_eye':'#3d3','shulker':'#a3f','chest':'#a84',
-  'obsidian':'#333','tnt':'#f33','totem':'#fd3','potion':'#f3f',
-  'enchanted':'#5f5','book':'#a84','enchant':'#5f5',
-  'coal':'#333','redstone':'#f00','lapis':'#33f','diamond_block':'#4af',
-};
-function getItemColor(id){
-  if(!id)return'#888';
-  const l=id.toLowerCase();
-  for(const[k,c]of Object.entries(ITEM_COLORS))if(l.includes(k))return c;
-  if(l.includes('diamond'))return'#4af';if(l.includes('netherite'))return'#555';
-  if(l.includes('gold'))return'#fc0';if(l.includes('iron'))return'#bbb';
-  if(l.includes('wood'))return'#a84';if(l.includes('stone'))return'#999';
-  if(l.includes('bed'))return'#f6a';if(l.includes('wool'))return'#eee';
-  return'#888';
+/* ---------- inventory items ---------- */
+function getItemIcon(id) {
+  if(!id) return '';
+  // Convert minecraft:item_id to sprite URL
+  const name = id.replace('minecraft:', '');
+  return `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.21/assets/minecraft/textures/item/${name}.png`;
 }
-function shortName(id){
-  if(!id)return'?';
-  const p=id.split(':');const n=(p[1]||p[0]||'').replace(/_/g,' ');
-  return n.length>14?n.substring(0,12)+'..':n;
+
+function getItemDisplayName(item) {
+  if(!item) return '?';
+  // Use real name if available, otherwise format ID
+  if(item.name) return item.name;
+  const id = (item.id || '').replace('minecraft:', '').replace(/_/g, ' ');
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+function isEnchanted(item) {
+  return item && item.ench && item.ench.length > 0;
+}
+
+function renderSlot(item, large) {
+  const size = large ? 52 : 44;
+  const fontSize = large ? 10 : 9;
+  
+  if(!item) return `<div style="width:${size}px;height:${size}px;background:#11111844;border:1px solid #ffffff08;border-radius:6px"></div>`;
+  
+  const name = getItemDisplayName(item);
+  const isEnch = isEnchanted(item);
+  const count = item.c > 1 ? item.c : '';
+  const iconUrl = getItemIcon(item.id);
+  
+  // Enchantment glint styles
+  const enchStyle = isEnch ? `
+    background: linear-gradient(135deg, #8b5cf655, #06b6d455, #8b5cf655);
+    border-color: #8b5cf688;
+    box-shadow: 0 0 8px #8b5cf644, inset 0 0 12px #06b6d422;
+  ` : '';
+  
+  // Durability bar
+  let durBar = '';
+  if(item.maxD && item.d !== undefined) {
+    const pct = 1 - (item.d / item.maxD);
+    const color = pct > 0.5 ? '#4caf50' : pct > 0.25 ? '#ff9800' : '#f44336';
+    durBar = `<div style="position:absolute;bottom:1px;left:2px;right:2px;height:2px;background:#333;border-radius:1px"><div style="height:100%;width:${pct*100}%;background:${color};border-radius:1px"></div></div>`;
+  }
+  
+  return `<div title="${esc(item.id)}\n${esc(name)}${item.d !== undefined ? '\nПрочность: '+(item.maxD-item.d)+'/'+item.maxD : ''}${isEnch ? '\nЗачаровано' : ''}" 
+    style="width:${size}px;height:${size}px;background:#1a1a2e;border:1px solid ${isEnch ? '#8b5cf688' : '#ffffff11'};border-radius:6px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:help;overflow:hidden;${enchStyle}">
+    <img src="${iconUrl}" style="width:${size-8}px;height:${size-8}px;image-rendering:pixelated" onerror="this.style.display='none';this.parentElement.querySelector('.item-fallback').style.display='flex'" />
+    <div class="item-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:${fontSize}px;color:var(--txt)">${esc(name.substring(0,6))}</div>
+    ${count ? `<div style="position:absolute;bottom:1px;right:3px;font-size:9px;color:#fff;font-weight:700;text-shadow:1px 1px 2px #000">${count}</div>` : ''}
+    ${durBar}
+    ${isEnch ? '<div style="position:absolute;top:1px;right:3px;font-size:8px">✨</div>' : ''}
+  </div>`;
 }
 
 /* ---------- players ---------- */
@@ -450,36 +478,22 @@ async function loadPlayers(){
         if(items.length){
           const slots=new Map();
           items.forEach(i=>{slots.set(i.s,i);});
-          // Armor row
+          // Armor
           let armorRow='<div style="display:flex;gap:3px;margin-top:8px">';
-          [39,38,37,36].forEach(s=>{
-            const it=slots.get(s);
-            if(it)armorRow+=`<div title="${esc(shortName(it.id))} x${it.c}" style="width:28px;height:28px;background:${getItemColor(it.id)}22;border:1px solid ${getItemColor(it.id)}66;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:${getItemColor(it.id)};cursor:help">${esc(shortName(it.id).substring(0,3))}</div>`;
-            else armorRow+=`<div style="width:28px;height:28px;background:#11111822;border:1px solid #ffffff08;border-radius:4px"></div>`;
-          });
-          // Offhand
-          const oh=slots.get(40);
-          if(oh)armorRow+=`<div title="${esc(shortName(oh.id))} x${oh.c}" style="width:28px;height:28px;background:${getItemColor(oh.id)}22;border:1px solid ${getItemColor(oh.id)}66;border-radius:4px;margin-left:8px;display:flex;align-items:center;justify-content:center;font-size:9px;color:${getItemColor(oh.id)};cursor:help">${esc(shortName(oh.id).substring(0,3))}</div>`;
+          [39,38,37,36].forEach(s=>armorRow+=renderSlot(slots.get(s),false));
+          armorRow+='<div style="width:6px"></div>';
+          armorRow+=renderSlot(slots.get(40),false);
           armorRow+='</div>';
           invHtml+=armorRow;
           // Hotbar
           let hotbar='<div style="display:flex;gap:3px;margin-top:5px">';
-          for(let i=0;i<9;i++){
-            const it=slots.get(i);
-            if(it)hotbar+=`<div title="${esc(shortName(it.id))} x${it.c}" style="width:28px;height:28px;background:${getItemColor(it.id)}22;border:1px solid ${getItemColor(it.id)}66;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:${getItemColor(it.id)};cursor:help;overflow:hidden;text-overflow:ellipsis">${esc(shortName(it.id).substring(0,4))}</div>`;
-            else hotbar+=`<div style="width:28px;height:28px;background:#11111822;border:1px solid #ffffff08;border-radius:4px"></div>`;
-          }
+          for(let i=0;i<9;i++) hotbar+=renderSlot(slots.get(i),false);
           hotbar+='</div>';
           invHtml+=hotbar;
-          // Main inventory (3 rows)
+          // Main
           for(let row=0;row<3;row++){
             let invRow='<div style="display:flex;gap:3px;margin-top:3px">';
-            for(let col=0;col<9;col++){
-              const s=9+row*9+col;
-              const it=slots.get(s);
-              if(it)invRow+=`<div title="${esc(shortName(it.id))} x${it.c}" style="width:28px;height:28px;background:${getItemColor(it.id)}22;border:1px solid ${getItemColor(it.id)}66;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:${getItemColor(it.id)};cursor:help;overflow:hidden;text-overflow:ellipsis">${esc(shortName(it.id).substring(0,4))}</div>`;
-              else invRow+=`<div style="width:28px;height:28px;background:#11111822;border:1px solid #ffffff08;border-radius:4px"></div>`;
-            }
+            for(let col=0;col<9;col++) invRow+=renderSlot(slots.get(9+row*9+col),false);
             invRow+='</div>';
             invHtml+=invRow;
           }
@@ -553,38 +567,30 @@ function showInventoryModal(username, btn){
     items.forEach(i => slots.set(i.s, i));
     
     // Build inventory grid
-    let gridHtml = '<div style="font-family:monospace">';
+    let gridHtml = '<div>';
     
-    // Armor row (slots 39,38,37,36)
-    gridHtml += '<div style="margin-bottom:12px"><div style="font-size:11px;color:var(--dim);margin-bottom:4px">БРОНЯ</div><div style="display:flex;gap:4px">';
-    [39,38,37,36].forEach(s => {
-      gridHtml += renderSlot(slots.get(s), s);
-    });
-    // Offhand (slot 40)
-    gridHtml += '<div style="width:8px"></div>';
-    gridHtml += renderSlot(slots.get(40), 40);
+    // Armor row
+    gridHtml += '<div style="margin-bottom:12px"><div style="font-size:11px;color:var(--dim);margin-bottom:6px">БРОНЯ</div><div style="display:flex;gap:4px">';
+    [39,38,37,36].forEach(s => gridHtml += renderSlot(slots.get(s), true));
+    gridHtml += '<div style="width:12px"></div>';
+    gridHtml += renderSlot(slots.get(40), true);
     gridHtml += '</div></div>';
     
-    // Main inventory (slots 9-35, 3 rows)
-    gridHtml += '<div style="margin-bottom:12px"><div style="font-size:11px;color:var(--dim);margin-bottom:4px">ИНВЕНТАРЬ</div>';
+    // Main inventory
+    gridHtml += '<div style="margin-bottom:12px"><div style="font-size:11px;color:var(--dim);margin-bottom:6px">ИНВЕНТАРЬ</div>';
     for(let row = 0; row < 3; row++) {
       gridHtml += '<div style="display:flex;gap:4px;margin-bottom:4px">';
       for(let col = 0; col < 9; col++) {
-        const s = 9 + row * 9 + col;
-        gridHtml += renderSlot(slots.get(s), s);
+        gridHtml += renderSlot(slots.get(9 + row * 9 + col), false);
       }
       gridHtml += '</div>';
     }
     gridHtml += '</div>';
     
-    // Hotbar (slots 0-8)
-    gridHtml += '<div><div style="font-size:11px;color:var(--dim);margin-bottom:4px">ХОТБАР</div><div style="display:flex;gap:4px">';
-    for(let i = 0; i < 9; i++) {
-      gridHtml += renderSlot(slots.get(i), i);
-    }
-    gridHtml += '</div></div>';
-    
-    gridHtml += '</div>';
+    // Hotbar
+    gridHtml += '<div><div style="font-size:11px;color:var(--dim);margin-bottom:6px">ХОТБАР</div><div style="display:flex;gap:4px">';
+    for(let i = 0; i < 9; i++) gridHtml += renderSlot(slots.get(i), false);
+    gridHtml += '</div></div></div>';
     
     modal.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
