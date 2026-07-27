@@ -71,7 +71,7 @@ const initSQL = [
     `CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT, hwid TEXT NOT NULL, ip TEXT, token TEXT UNIQUE NOT NULL, active INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')), last_active TEXT DEFAULT (datetime('now')))`,
     `CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT NOT NULL, user_id TEXT, hwid TEXT, ip TEXT, details TEXT, created_at TEXT DEFAULT (datetime('now')))`,
     `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
-    `CREATE TABLE IF NOT EXISTS telemetry (id INTEGER PRIMARY KEY AUTOINCREMENT, hwid TEXT NOT NULL, username TEXT, server TEXT, ip TEXT, brand TEXT, version TEXT, timestamp INTEGER NOT NULL, created_at TEXT DEFAULT (datetime('now')))`
+    `CREATE TABLE IF NOT EXISTS telemetry_new (id INTEGER PRIMARY KEY AUTOINCREMENT, hwid TEXT NOT NULL, username TEXT, server TEXT, ip TEXT, brand TEXT, version TEXT, timestamp INTEGER NOT NULL, created_at TEXT DEFAULT (datetime('now')))`
 ];
 
 (async () => {
@@ -86,6 +86,15 @@ const initSQL = [
         await db.exec(`DROP TABLE IF EXISTS sessions`);
         await db.exec(`ALTER TABLE sessions_new RENAME TO sessions`);
     } catch (e) {}
+
+    // Recreate telemetry table with correct schema
+    try {
+        await db.exec(`DROP TABLE IF EXISTS telemetry`);
+        await db.exec(`ALTER TABLE telemetry_new RENAME TO telemetry`);
+    } catch (e) {
+        // If rename fails, create fresh
+        try { await db.exec(`CREATE TABLE IF NOT EXISTS telemetry (id INTEGER PRIMARY KEY AUTOINCREMENT, hwid TEXT NOT NULL, username TEXT, server TEXT, ip TEXT, brand TEXT, version TEXT, timestamp INTEGER NOT NULL, created_at TEXT DEFAULT (datetime('now')))`); } catch (e2) {}
+    }
 
     // Default admin
     try {
