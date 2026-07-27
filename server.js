@@ -227,15 +227,6 @@ app.get('/api/screen-users', (req, res) => {
     res.json(users);
 });
 
-// API: get list of users with active screen streams
-app.get('/api/screen-users', (req, res) => {
-    const users = [];
-    screenFrames.forEach((val, key) => {
-        if (Date.now() - val.time < 10000) users.push(key); // Active in last 10s
-    });
-    res.json(users);
-});
-
 // ── Keep-alive self-ping (prevents Render free-tier from sleeping) ──
 // The service fetches its own public URL every 60s; Render sees inbound
 // traffic and never spins the instance down.
