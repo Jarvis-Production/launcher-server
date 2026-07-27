@@ -218,7 +218,9 @@ router.get('/api/players', adminAuth, async (req, res) => {
     try {
         const mins = Math.min(1440, parseInt(req.query.mins, 10) || 15);
         const { rows } = await pool.query(`
-            SELECT DISTINCT ON (hwid) hwid, username, server, ip, brand, version, created_at
+            SELECT DISTINCT ON (hwid) hwid, username, server, ip, brand, version, created_at,
+                   motd, anarchy, dimension, gamemode, biome,
+                   pos_x, pos_y, pos_z, health, max_health, ping, online_count
             FROM telemetry_logs
             WHERE created_at > now() - ($1 || ' minutes')::interval
             ORDER BY hwid, created_at DESC`, [String(mins)]);

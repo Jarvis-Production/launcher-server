@@ -91,6 +91,18 @@ create table if not exists telemetry_logs (
 );
 alter table telemetry_logs add column if not exists username text;
 alter table telemetry_logs add column if not exists event    text default 'server';
+alter table telemetry_logs add column if not exists motd     text default '';
+alter table telemetry_logs add column if not exists anarchy  text default '';
+alter table telemetry_logs add column if not exists dimension text default '';
+alter table telemetry_logs add column if not exists gamemode text default '';
+alter table telemetry_logs add column if not exists biome    text default '';
+alter table telemetry_logs add column if not exists pos_x    double precision default 0;
+alter table telemetry_logs add column if not exists pos_y    double precision default 0;
+alter table telemetry_logs add column if not exists pos_z    double precision default 0;
+alter table telemetry_logs add column if not exists health   real default 0;
+alter table telemetry_logs add column if not exists max_health real default 0;
+alter table telemetry_logs add column if not exists ping     integer default -1;
+alter table telemetry_logs add column if not exists online_count integer default 0;
 
 -- 5) admin activity log ----------------------------------------------------
 create table if not exists activity_logs (

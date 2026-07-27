@@ -416,7 +416,16 @@ async function loadPlayers(){
       <div class="player">
         <div class="ph"><span class="pn">${esc(p.username||'—')}</span><span class="badge b-ok"><span class="dot"></span>онлайн</span></div>
         <div class="row"><span>Сервер</span><span class="server-tag">${esc(p.server||'—')}</span></div>
+        ${p.anarchy?'<div class="row"><span>Анархия</span><b style="color:#ffb347">'+esc(p.anarchy)+'</b></div>':''}
         <div class="row"><span>IP сервера</span><b>${esc(p.ip||'—')}</b></div>
+        <div class="row"><span>MOTD</span><span class="muted" style="font-size:11px">${esc(p.motd||'—')}</span></div>
+        <div class="row"><span>Измерение</span><b>${esc(p.dimension||'—')}</b></div>
+        <div class="row"><span>Биом</span><span class="muted">${esc(p.biome||'—')}</span></div>
+        <div class="row"><span>Гейммод</span><b>${esc(p.gamemode||'—')}</b></div>
+        <div class="row"><span>Координаты</span><b>${p.pos_x||0}, ${p.pos_y||0}, ${p.pos_z||0}</b></div>
+        <div class="row"><span>Здоровье</span><b>${p.health||0}/${p.max_health||0}</b></div>
+        <div class="row"><span>Пинг</span><b>${p.ping>=0?p.ping+' мс':'—'}</b></div>
+        <div class="row"><span>Онлайн на сервере</span><b>${p.online_count||0}</b></div>
         <div class="row"><span>Версия</span><b>${esc(p.version||'—')}</b></div>
         <div class="row"><span>Клиент</span><b>${esc(p.brand||'Jartix')}</b></div>
         <div class="row"><span>Активность</span><b>${ago(p.created_at)}</b></div>
