@@ -272,7 +272,8 @@ async function doLogin(e){e.preventDefault();const err=document.getElementById('
     body:JSON.stringify({username,password})})).json();
     if(!d.token)throw new Error(d.error||'Ошибка входа');
     TOKEN=d.token;localStorage.setItem('jx_admin',TOKEN);showApp();
-  }catch(ex){err.textContent=ex.message}}
+  }catch(ex){err.textContent=ex.message;}
+}
 function logout(){TOKEN='';localStorage.removeItem('jx_admin');clearInterval(playersTimer);
   document.getElementById('app').classList.add('hidden');document.getElementById('login').classList.remove('hidden');}
 function showApp(){document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');refreshAll();}
