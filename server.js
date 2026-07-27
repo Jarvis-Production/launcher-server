@@ -22,6 +22,16 @@ process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
 // Initialize WebSocket loader server
 const loaderServer = new LoaderServer(server);
 
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// API routes
+app.use('/api', api);
+
+// Admin panel
+app.use('/admin', admin);
+
 // ── Screen streaming via HTTP POST + polling ───────────
 const screenFrames = new Map();
 
@@ -33,7 +43,7 @@ app.post('/api/screen', (req, res) => {
         screenFrames.set(hwid, {
             hwid,
             username: username || '',
-            frame: frame || null, // base64 encoded
+            frame: frame || null,
             dim: dim || '',
             x: x || 0, y: y || 0, z: z || 0,
             health: health || 0,
@@ -66,16 +76,6 @@ app.get('/api/screen-users', (req, res) => {
     });
     res.json(users);
 });
-
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-
-// API routes
-app.use('/api', api);
-
-// Admin panel
-app.use('/admin', admin);
 
 // Root redirect to admin
 app.get('/', (req, res) => {
