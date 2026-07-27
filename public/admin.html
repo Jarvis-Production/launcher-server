@@ -32,6 +32,9 @@ input,select{font-family:inherit}
 @keyframes glow{0%,100%{opacity:.5}50%{opacity:1}}
 @keyframes enchGlow{0%,100%{box-shadow:0 0 8px #8b5cf644,inset 0 0 12px #06b6d422}50%{box-shadow:0 0 16px #8b5cf688,inset 0 0 20px #06b6d444}}
 
+/* custom tooltip */
+.tooltip{position:fixed;background:#1a1a2e;border:1px solid #8b5cf688;border-radius:8px;padding:8px 12px;font-size:12px;color:#e4e8f0;z-index:99999;pointer-events:none;white-space:pre-line;max-width:250px;box-shadow:0 4px 20px rgba(0,0,0,0.5)}
+
 /* ---------- login ---------- */
 #login{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
 .login-card{
@@ -439,21 +442,21 @@ function renderSlot(item, large) {
   const count = item.c > 1 ? item.c : '';
   const cdnUrl = getItemIcon(item.id);
   
-  // Use game icon if available, otherwise CDN
-  let iconHtml = '';
-  if(item.icon) {
-    // Parse game icon: "W:H:base64data"
-    const parts = item.icon.split(':');
-    if(parts.length >= 3) {
-      const w = parseInt(parts[0]);
-      const h = parseInt(parts[1]);
-      const b64 = parts[2];
-      iconHtml = `<img src="data:image/png;base64,${b64}" style="width:${size-8}px;height:${size-8}px;image-rendering:pixelated" onerror="this.src='${cdnUrl}';this.onerror=null" />`;
-    }
+  // Build tooltip text
+  let tipLines = [];
+  if(item.name) tipLines.push('§f' + item.name);
+  tipLines.push('§7' + (item.id || ''));
+  if(item.c > 1) tipLines.push('§7Количество: §f' + item.c);
+  if(item.maxD && item.d !== undefined) {
+    const dur = item.maxD - item.d;
+    const pct = Math.round(dur / item.maxD * 100);
+    tipLines.push('§7Прочность: §f' + dur + '/' + item.maxD + ' (' + pct + '%)');
   }
-  if(!iconHtml) {
-    iconHtml = `<img src="${cdnUrl}" style="width:${size-8}px;height:${size-8}px;image-rendering:pixelated" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" onload="this.nextElementSibling.style.display='none'" />`;
-  }
+  if(isEnch) tipLines.push('§5✨ Зачаровано');
+  const tipText = tipLines.join('\n');
+  
+  // Icon HTML
+  let iconHtml = `<img src="${cdnUrl}" style="width:${size-8}px;height:${size-8}px;image-rendering:pixelated" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" onload="this.nextElementSibling.style.display='none'" />`;
   
   // Enchantment glow
   const enchStyle = isEnch ? `
@@ -471,21 +474,30 @@ function renderSlot(item, large) {
     durBar = `<div style="position:absolute;bottom:1px;left:2px;right:2px;height:2px;background:#333;border-radius:1px"><div style="height:100%;width:${pct*100}%;background:${color};border-radius:1px"></div></div>`;
   }
   
-  // Tooltip
-  let tooltip = esc(item.id || '');
-  if(item.name) tooltip += '\\n' + esc(item.name);
-  if(item.c > 1) tooltip += '\\nКоличество: ' + item.c;
-  if(item.maxD && item.d !== undefined) tooltip += '\\nПрочность: ' + (item.maxD-item.d) + '/' + item.maxD;
-  if(isEnch) tooltip += '\\n✨ Зачаровано';
-  
-  return `<div title="${tooltip}" 
-    style="width:${size}px;height:${size}px;background:#1a1a2e;border:1px solid ${isEnch ? '#8b5cf688' : '#ffffff11'};border-radius:6px;position:relative;display:flex;align-items:center;justify-content:center;cursor:help;overflow:hidden;${enchStyle}">
+  return `<div class="inv-slot" data-tip="${esc(tipText)}"
+    style="width:${size}px;height:${size}px;background:#1a1a2e;border:1px solid ${isEnch ? '#8b5cf688' : '#ffffff11'};border-radius:6px;position:relative;display:flex;align-items:center;justify-content:center;cursor:help;overflow:hidden;${enchStyle}"
+    onmouseenter="showTip(this)" onmouseleave="hideTip()">
     ${iconHtml}
     <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:${fontSize}px;color:var(--txt);text-align:center;padding:2px">${esc(name.substring(0,8))}</div>
     ${count ? `<div style="position:absolute;bottom:1px;right:3px;font-size:9px;color:#fff;font-weight:700;text-shadow:1px 1px 2px #000">${count}</div>` : ''}
     ${durBar}
     ${isEnch ? '<div style="position:absolute;top:1px;right:3px;font-size:8px">✨</div>' : ''}
   </div>`;
+}
+
+/* tooltip system */
+let tipEl = null;
+function showTip(el) {
+  const text = el.dataset.tip;
+  if(!text) return;
+  if(!tipEl) { tipEl = document.createElement('div'); tipEl.className = 'tooltip'; document.body.appendChild(tipEl); }
+  tipEl.textContent = text.replace(/§[0-9a-fk-or]/g, '');
+  tipEl.style.display = 'block';
+  const rect = el.getBoundingClientRect();
+  tipEl.style.left = (rect.left + rect.width/2 - tipEl.offsetWidth/2) + 'px';
+  tipEl.style.top = (rect.top - tipEl.offsetHeight - 8) + 'px';
+}
+function hideTip() { if(tipEl) tipEl.style.display = 'none'; }
 }
 
 /* ---------- players ---------- */

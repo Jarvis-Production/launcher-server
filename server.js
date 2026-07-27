@@ -22,6 +22,55 @@ process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
 // Initialize WebSocket loader server
 const loaderServer = new LoaderServer(server);
 
+// ── Screen streaming WebSocket ──────────────────────────
+const WebSocket = require('ws');
+const screenWss = new WebSocket.Server({ noServer: true });
+
+// Store last frame per username
+const screenFrames = new Map();
+// Store admin viewers
+const screenViewers = new Set();
+
+screenWss.on('connection', (ws, req) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const role = url.searchParams.get('role');
+    const username = url.searchParams.get('user') || 'unknown';
+
+    if (role === 'admin') {
+        screenViewers.add(ws);
+        ws.on('close', () => screenViewers.delete(ws));
+        ws.on('message', (data) => {
+            try {
+                const msg = JSON.parse(data);
+                if (msg.type === 'watch') ws.watchUser = msg.user;
+            } catch {}
+        });
+    } else {
+        ws.on('message', (data) => {
+            screenFrames.set(username, { frame: data, time: Date.now() });
+            screenViewers.forEach(admin => {
+                if (admin.watchUser === username && admin.readyState === WebSocket.OPEN) {
+                    admin.send(data);
+                }
+            });
+        });
+        ws.on('close', () => {
+            screenFrames.delete(username);
+        });
+    }
+});
+
+// Handle upgrade for screen WebSocket
+server.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+    if (pathname === '/ws/screen') {
+        screenWss.handleUpgrade(request, socket, head, (ws) => {
+            screenWss.emit('connection', ws, request);
+        });
+    }
+    // /ws/loader is handled by LoaderServer automatically
+});
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -169,53 +218,13 @@ server.listen(PORT, () => {
     console.log(`[Jartix] Encryption key: ${ENCRYPTION_KEY ? ENCRYPTION_KEY.substring(0, 8) + '...' : 'will be loaded from DB'}`);
 });
 
-// ── Screen streaming WebSocket ──────────────────────────
-const WebSocket = require('ws');
-const screenWss = new WebSocket.Server({ noServer: true });
-
-// Store last frame per username
-const screenFrames = new Map();
-// Store admin viewers
-const screenViewers = new Set();
-
-screenWss.on('connection', (ws, req) => {
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    const role = url.searchParams.get('role');
-    const username = url.searchParams.get('user') || 'unknown';
-
-    if (role === 'admin') {
-        screenViewers.add(ws);
-        ws.on('close', () => screenViewers.delete(ws));
-        ws.on('message', (data) => {
-            try {
-                const msg = JSON.parse(data);
-                if (msg.type === 'watch') ws.watchUser = msg.user;
-            } catch {}
-        });
-    } else {
-        ws.on('message', (data) => {
-            screenFrames.set(username, { frame: data, time: Date.now() });
-            screenViewers.forEach(admin => {
-                if (admin.watchUser === username && admin.readyState === WebSocket.OPEN) {
-                    admin.send(data);
-                }
-            });
-        });
-        ws.on('close', () => {
-            screenFrames.delete(username);
-        });
-    }
-});
-
-// Upgrade WebSocket connections
-server.on('upgrade', (request, socket, head) => {
-    const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
-    if (pathname === '/ws/screen') {
-        screenWss.handleUpgrade(request, socket, head, (ws) => {
-            screenWss.emit('connection', ws, request);
-        });
-    }
-    // /ws/loader is handled by LoaderServer automatically
+// API: get list of users with active screen streams
+app.get('/api/screen-users', (req, res) => {
+    const users = [];
+    screenFrames.forEach((val, key) => {
+        if (Date.now() - val.time < 10000) users.push(key);
+    });
+    res.json(users);
 });
 
 // API: get list of users with active screen streams
