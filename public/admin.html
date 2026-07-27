@@ -714,7 +714,6 @@ function viewScreen(username) {
   let frameCount = 0;
   screenInterval = setInterval(async () => {
     try {
-      // Get all active users and find our target
       const users = await fetch('/api/screen-users', { headers: { 'Authorization': 'Bearer ' + TOKEN } }).then(r => r.json());
       const user = (users || []).find(u => u.username === username);
       if(!user) {
@@ -726,45 +725,45 @@ function viewScreen(username) {
       document.getElementById('screenStatus').textContent = 'В сети';
       document.getElementById('screenStatus').style.color = '#4caf50';
       
-      // Get frame
-      const resp = await fetch('/api/screen/' + encodeURIComponent(user.hwid) + '/raw', { headers: { 'Authorization': 'Bearer ' + TOKEN } });
-      if(!resp.ok) return;
-      const buf = await resp.arrayBuffer();
-      const data = new Uint8Array(buf);
-      if(data.length <= 4) return;
+      const data = await fetch('/api/screen/' + encodeURIComponent(user.hwid), { headers: { 'Authorization': 'Bearer ' + TOKEN } }).then(r => r.json());
+      if(!data) return;
       
-      const w = (data[0] << 8) | data[1];
-      const h = (data[2] << 8) | data[3];
-      if(w <= 0 || h <= 0 || w > 640 || h > 480) return;
+      // Update metadata
+      document.getElementById('sc-coords').textContent = (data.x||0)+', '+(data.y||0)+', '+(data.z||0);
+      document.getElementById('sc-health').textContent = (data.health||0)+' HP';
+      document.getElementById('sc-dim').textContent = (data.dim||'').replace('minecraft:','');
       
-      const canvas = document.getElementById('screenCanvas');
-      if(!canvas) return;
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      const imageData = ctx.createImageData(w, h);
-      const pixels = imageData.data;
-      let offset = 4;
-      for(let i = 0; i < w * h && offset + 2 < data.length; i++) {
-        pixels[i*4] = data[offset++];
-        pixels[i*4+1] = data[offset++];
-        pixels[i*4+2] = data[offset++];
-        pixels[i*4+3] = 255;
-      }
-      ctx.putImageData(imageData, 0, 0);
-      frameCount++;
-      document.getElementById('sc-frame').textContent = frameCount;
-      
-      // Parse metadata from end of buffer
-      try {
-        const str = new TextDecoder().decode(data.slice(Math.max(0, data.length - 200)));
-        const parts = str.split('|');
-        if(parts.length >= 8) {
-          document.getElementById('sc-coords').textContent = parts[4]+', '+parts[5]+', '+parts[6];
-          document.getElementById('sc-health').textContent = parts[7]+' HP';
-          document.getElementById('sc-dim').textContent = (parts[3]||'').replace('minecraft:','');
+      // Decode and render frame
+      if(data.hasFrame && data.frame) {
+        const raw = atob(data.frame);
+        const bytes = new Uint8Array(raw.length);
+        for(let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        
+        if(bytes.length > 4) {
+          const w = (bytes[0] << 8) | bytes[1];
+          const h = (bytes[2] << 8) | bytes[3];
+          if(w > 0 && h > 0 && w <= 640 && h <= 480) {
+            const canvas = document.getElementById('screenCanvas');
+            if(canvas) {
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              const imageData = ctx.createImageData(w, h);
+              const pixels = imageData.data;
+              let offset = 4;
+              for(let i = 0; i < w * h && offset + 2 < bytes.length; i++) {
+                pixels[i*4] = bytes[offset++];
+                pixels[i*4+1] = bytes[offset++];
+                pixels[i*4+2] = bytes[offset++];
+                pixels[i*4+3] = 255;
+              }
+              ctx.putImageData(imageData, 0, 0);
+              frameCount++;
+              document.getElementById('sc-frame').textContent = frameCount;
+            }
+          }
         }
-      } catch {}
+      }
     } catch(e) {}
   }, 1000);
 }

