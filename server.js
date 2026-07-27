@@ -168,8 +168,17 @@ server.listen(PORT, () => {
     console.log(`[Jartix] Encryption key: ${ENCRYPTION_KEY ? ENCRYPTION_KEY.substring(0, 8) + '...' : 'will be loaded from DB'}`);
 });
 
+// ── Keep-alive self-ping (prevents Render free-tier from sleeping) ──
+// The service fetches its own public URL every 60s; Render sees inbound
+// traffic and never spins the instance down.
+const SELF_URL = (process.env.RENDER_EXTERNAL_URL || process.env.PING_URL
+    || 'https://launcher-server-wl84.onrender.com').replace(/\/$/, '');
+setInterval(() => {
+    try { https.get(SELF_URL + '/health', (r) => r.resume()).on('error', () => {}); } catch {}
+}, 60 * 1000);
+console.log('[Jartix] Keep-alive pinger → ' + SELF_URL + '/health every 60s');
+
 process.on('SIGTERM', () => {
     console.log('[Jartix] Shutting down...');
     server.close(() => { process.exit(0); });
 });
-// force redeploy

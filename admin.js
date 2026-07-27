@@ -1,130 +1,248 @@
+// Admin API — Supabase-backed. Manages profiles (keys/licenses), players
+// (telemetry) and the activity log. Auth is a single admin password (JWT).
 const express = require('express');
 const router = express.Router();
 const path = require('path');
-const multer = require('multer');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
-const { db, generateKey, hashHWID } = require('./db');
+const { pool, one, clientIp } = require('./sbdb');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'jartix-secret-change-in-production';
-const upload = multer({ dest: path.join(__dirname, 'client') });
+const ADMIN_USER = process.env.ADMIN_USER || 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
+// ── auth ──────────────────────────────────────────────────────────────────
 router.post('/api/login', async (req, res) => {
-    try {
-        const { username, password } = req.body;
-        const user = await db.prepare('SELECT * FROM users WHERE username = ? AND role = ?').get(username, 'admin');
-        if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-        if (!bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Invalid credentials' });
-        const token = jwt.sign({ id: user.id, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
-        res.json({ ok: true, token });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    const { username, password } = req.body || {};
+    if (username === ADMIN_USER && password === ADMIN_PASSWORD) {
+        const token = jwt.sign({ role: 'admin', username }, JWT_SECRET, { expiresIn: '24h' });
+        return res.json({ ok: true, token });
+    }
+    res.status(401).json({ error: 'Invalid credentials' });
 });
 
 function adminAuth(req, res, next) {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) return res.status(401).json({ error: 'No token' });
-    try { const d = jwt.verify(token, JWT_SECRET); if (d.role !== 'admin') return res.status(403).json({ error: 'Admin only' }); req.admin = d; next(); }
-    catch { res.status(401).json({ error: 'Invalid token' }); }
+    try {
+        const d = jwt.verify(token, JWT_SECRET);
+        if (d.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+        req.admin = d;
+        next();
+    } catch { res.status(401).json({ error: 'Invalid token' }); }
 }
 
+async function logAction(event, req, extra = {}) {
+    try {
+        await pool.query(
+            'INSERT INTO activity_logs (event, username, ip, details) VALUES ($1,$2,$3,$4)',
+            [event, extra.username || null, clientIp(req), extra.details || null]
+        );
+    } catch {}
+}
+
+// ── stats ─────────────────────────────────────────────────────────────────
 router.get('/api/stats', adminAuth, async (req, res) => {
     try {
-        const totalUsers = (await db.prepare('SELECT COUNT(*) as c FROM users').get()).c;
-        const totalKeys = (await db.prepare('SELECT COUNT(*) as c FROM keys').get()).c;
-        const activeKeys = (await db.prepare('SELECT COUNT(*) as c FROM keys WHERE active = 1 AND expires_at > datetime(\'now\')').get()).c;
-        const activeSessions = (await db.prepare('SELECT COUNT(*) as c FROM sessions WHERE active = 1 AND last_active > datetime(\'now\', \'-5 minutes\')').get()).c;
-        const totalHWIDResets = (await db.prepare('SELECT COUNT(*) as c FROM logs WHERE event = ?').get('hwid_reset')).c;
-        res.json({ totalUsers, totalKeys, activeKeys, activeSessions, totalHWIDResets });
+        const s = await one(`
+            SELECT
+              (SELECT count(*) FROM profiles)                                              AS total_users,
+              (SELECT count(*) FROM profiles WHERE license_active AND active AND NOT banned) AS licensed,
+              (SELECT count(*) FROM profiles WHERE banned)                                  AS banned,
+              (SELECT count(*) FROM profiles WHERE license_active AND expires_at IS NOT NULL
+                    AND expires_at < now() + interval '3 days' AND expires_at > now())       AS expiring_soon,
+              (SELECT count(DISTINCT hwid) FROM telemetry_logs
+                    WHERE created_at > now() - interval '5 minutes')                          AS online
+        `);
+        res.json(s);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/api/keys', adminAuth, async (req, res) => {
-    try { const keys = await db.prepare('SELECT k.*, u.username FROM keys k LEFT JOIN users u ON k.user_id = u.id ORDER BY k.created_at DESC').all(); res.json(keys); }
-    catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/api/keys/generate', adminAuth, async (req, res) => {
-    try {
-        const { count = 1, duration_days = 2592000, hwid_limit = 1, key_type = 'client' } = req.body;
-        const type = ['admin', 'client'].includes(key_type) ? key_type : 'client';
-        const keys = [];
-        // Calculate expiry at creation time (duration_days stores seconds)
-        const expiresDate = new Date(Date.now() + duration_days * 1000);
-        const expiresStr = expiresDate.toISOString().replace('T', ' ').replace('Z', '');
-        for (let i = 0; i < Math.min(count, 100); i++) {
-            const keyCode = generateKey();
-            await db.prepare('INSERT INTO keys (id, key_code, key_type, duration_days, hwid_limit, created_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(uuidv4(), keyCode, type, duration_days, hwid_limit, 'admin', expiresStr);
-            keys.push(keyCode);
-        }
-        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('keys_generated', `${count} ${type} keys, ${duration_days}s`);
-        res.json({ ok: true, keys, keyType: type });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.delete('/api/keys/:id', adminAuth, async (req, res) => {
-    try { await db.prepare('UPDATE keys SET active = 0 WHERE id = ?').run(req.params.id); res.json({ ok: true }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
-});
-
+// ── users / profiles ───────────────────────────────────────────────────────
 router.get('/api/users', adminAuth, async (req, res) => {
-    try { const users = await db.prepare('SELECT id, username, role, hwid, created_at, last_login FROM users ORDER BY created_at DESC').all(); res.json(users); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    try {
+        const search = (req.query.search || '').trim();
+        const filter = (req.query.filter || 'all');
+        const params = [];
+        let where = 'WHERE 1=1';
+        if (search) {
+            params.push('%' + search + '%');
+            where += ` AND (username ILIKE $${params.length} OR license_key ILIKE $${params.length})`;
+        }
+        if (filter === 'licensed') where += ' AND license_active AND active AND NOT banned';
+        else if (filter === 'inactive') where += ' AND (NOT license_active OR NOT active)';
+        else if (filter === 'banned') where += ' AND banned';
+        else if (filter === 'expiring') where += " AND license_active AND expires_at IS NOT NULL AND expires_at < now() + interval '3 days' AND expires_at > now()";
+
+        const { rows } = await pool.query(
+            `SELECT id, username, license_key, key_type, hwid, hwid_limit, active,
+                    license_active, banned, expires_at, last_ip, last_login, created_at, notes
+             FROM profiles ${where} ORDER BY created_at DESC LIMIT 500`, params);
+        res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/api/users/:id/reset-hwid', adminAuth, async (req, res) => {
+router.get('/api/users/:id', adminAuth, async (req, res) => {
     try {
-        await db.prepare('UPDATE keys SET hwid = NULL, user_id = NULL, activated_at = NULL, expires_at = NULL WHERE user_id = ?').run(req.params.id);
-        await db.prepare('UPDATE users SET hwid = NULL WHERE id = ?').run(req.params.id);
-        await db.prepare('UPDATE sessions SET active = 0 WHERE user_id = ?').run(req.params.id);
-        await db.prepare('INSERT INTO logs (event, user_id, details) VALUES (?, ?, ?)').run('hwid_reset', req.params.id, 'admin reset');
+        const p = await one('SELECT * FROM profiles WHERE id = $1', [req.params.id]);
+        if (!p) return res.status(404).json({ error: 'Not found' });
+        const tel = (await pool.query(
+            'SELECT * FROM telemetry_logs WHERE username = $1 OR hwid = $2 ORDER BY created_at DESC LIMIT 25',
+            [p.username, p.hwid])).rows;
+        const acts = (await pool.query(
+            'SELECT * FROM activity_logs WHERE username = $1 ORDER BY created_at DESC LIMIT 25',
+            [p.username])).rows;
+        res.json({ profile: p, telemetry: tel, activity: acts });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Grant / extend a license. body: { days: number|null (null = lifetime), key_type }
+router.post('/api/users/:id/license', adminAuth, async (req, res) => {
+    try {
+        const { days, key_type } = req.body || {};
+        const lifetime = days === null || days === undefined || days === 0 || days === 'lifetime';
+        const type = ['admin', 'client'].includes(key_type) ? key_type : undefined;
+        const expr = lifetime ? null : `now() + ($1 || ' days')::interval`;
+        const params = lifetime ? [] : [String(parseInt(days, 10))];
+        const p = await one(
+            `UPDATE profiles SET license_active = true, active = true,
+                    expires_at = ${lifetime ? 'NULL' : expr}
+                    ${type ? `, key_type = '${type}'` : ''}
+             WHERE id = $${params.length + 1} RETURNING username, expires_at`,
+            [...params, req.params.id]);
+        if (!p) return res.status(404).json({ error: 'Not found' });
+        await logAction('license_grant', req, { username: p.username, details: lifetime ? 'lifetime' : days + 'd' });
+        res.json({ ok: true, expires: p.expires_at });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Revoke the license but keep the key.
+router.post('/api/users/:id/revoke', adminAuth, async (req, res) => {
+    try {
+        const p = await one('UPDATE profiles SET license_active = false WHERE id = $1 RETURNING username', [req.params.id]);
+        await logAction('license_revoke', req, { username: p?.username });
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/api/logs', adminAuth, async (req, res) => {
-    try { const limit = Math.min(parseInt(req.query.limit) || 50, 200); const logs = await db.prepare('SELECT * FROM logs ORDER BY created_at DESC LIMIT ?').all(limit); res.json(logs); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+// Annul (disable) the key entirely.
+router.post('/api/users/:id/annul', adminAuth, async (req, res) => {
+    try {
+        const p = await one('UPDATE profiles SET active = false, license_active = false WHERE id = $1 RETURNING username', [req.params.id]);
+        await logAction('key_annul', req, { username: p?.username });
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/users/:id/restore', adminAuth, async (req, res) => {
+    try {
+        const p = await one('UPDATE profiles SET active = true WHERE id = $1 RETURNING username', [req.params.id]);
+        await logAction('key_restore', req, { username: p?.username });
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/users/:id/ban', adminAuth, async (req, res) => {
+    try {
+        const p = await one('UPDATE profiles SET banned = true WHERE id = $1 RETURNING username', [req.params.id]);
+        await logAction('ban', req, { username: p?.username });
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/users/:id/unban', adminAuth, async (req, res) => {
+    try {
+        const p = await one('UPDATE profiles SET banned = false WHERE id = $1 RETURNING username', [req.params.id]);
+        await logAction('unban', req, { username: p?.username });
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/users/:id/reset-hwid', adminAuth, async (req, res) => {
+    try {
+        const p = await one('UPDATE profiles SET hwid = NULL WHERE id = $1 RETURNING username', [req.params.id]);
+        await logAction('hwid_reset', req, { username: p?.username });
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Issue a brand-new key for this user.
+router.post('/api/users/:id/rotate-key', adminAuth, async (req, res) => {
+    try {
+        let p = null;
+        for (let i = 0; i < 5 && !p; i++) {
+            try {
+                p = await one('UPDATE profiles SET license_key = generate_key() WHERE id = $1 RETURNING username, license_key', [req.params.id]);
+            } catch (err) { if (!/unique/i.test(err.message)) throw err; }
+        }
+        if (!p) return res.status(500).json({ error: 'Could not generate key' });
+        await logAction('key_rotate', req, { username: p.username, details: p.license_key });
+        res.json({ ok: true, key: p.license_key });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/users/:id/key-type', adminAuth, async (req, res) => {
+    try {
+        const type = ['admin', 'client'].includes(req.body?.key_type) ? req.body.key_type : 'client';
+        const p = await one('UPDATE profiles SET key_type = $1 WHERE id = $2 RETURNING username', [type, req.params.id]);
+        await logAction('key_type', req, { username: p?.username, details: type });
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/users/:id/hwid-limit', adminAuth, async (req, res) => {
+    try {
+        const lim = Math.max(1, Math.min(10, parseInt(req.body?.hwid_limit, 10) || 1));
+        const p = await one('UPDATE profiles SET hwid_limit = $1 WHERE id = $2 RETURNING username', [lim, req.params.id]);
+        res.json({ ok: true, hwid_limit: lim });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/users/:id/notes', adminAuth, async (req, res) => {
+    try {
+        await pool.query('UPDATE profiles SET notes = $1 WHERE id = $2', [req.body?.notes || null, req.params.id]);
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/api/users/:id', adminAuth, async (req, res) => {
+    try {
+        const p = await one('DELETE FROM profiles WHERE id = $1 RETURNING username', [req.params.id]);
+        await logAction('user_delete', req, { username: p?.username });
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── players (live telemetry) ────────────────────────────────────────────────
+// Latest report per HWID within the window = who is currently in-game & where.
+router.get('/api/players', adminAuth, async (req, res) => {
+    try {
+        const mins = Math.min(1440, parseInt(req.query.mins, 10) || 15);
+        const { rows } = await pool.query(`
+            SELECT DISTINCT ON (hwid) hwid, username, server, ip, brand, version, created_at
+            FROM telemetry_logs
+            WHERE created_at > now() - ($1 || ' minutes')::interval
+            ORDER BY hwid, created_at DESC`, [String(mins)]);
+        res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/api/telemetry', adminAuth, async (req, res) => {
     try {
-        const limit = Math.min(parseInt(req.query.limit) || 100, 500);
-        const srv = req.query.server;
-        let rows;
-        if (srv) {
-            rows = await db.prepare('SELECT * FROM telemetry WHERE server LIKE ? OR ip LIKE ? ORDER BY timestamp DESC LIMIT ?').all('%' + srv + '%', '%' + srv + '%', limit);
-        } else {
-            rows = await db.prepare('SELECT * FROM telemetry ORDER BY timestamp DESC LIMIT ?').all(limit);
-        }
-        res.json(rows || []);
-    } catch (e) { res.json([]); }
-});
-
-router.post('/api/client/set-url', adminAuth, async (req, res) => {
-    try {
-        const { url } = req.body;
-        if (!url) return res.status(400).json({ error: 'URL required' });
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_url', url);
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
-        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_url_set', url);
-        res.json({ ok: true, url });
+        const limit = Math.min(500, parseInt(req.query.limit, 10) || 100);
+        const { rows } = await pool.query('SELECT * FROM telemetry_logs ORDER BY created_at DESC LIMIT $1', [limit]);
+        res.json(rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/api/client/upload', adminAuth, upload.single('client'), async (req, res) => {
+router.get('/api/logs', adminAuth, async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ error: 'No file' });
-        const fs = require('fs');
-        const jarData = fs.readFileSync(req.file.path);
-        fs.unlinkSync(req.file.path);
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_jar', jarData.toString('base64'));
-        await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('client_version', req.body.version || '1.0.0');
-        await db.prepare('INSERT INTO logs (event, details) VALUES (?, ?)').run('client_upload', `version ${req.body.version || '1.0.0'}`);
-        res.json({ ok: true, message: 'Client uploaded', size: jarData.length });
+        const limit = Math.min(500, parseInt(req.query.limit, 10) || 100);
+        const { rows } = await pool.query('SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT $1', [limit]);
+        res.json(rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
+// ── panel page ──────────────────────────────────────────────────────────────
+router.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 
 module.exports = router;

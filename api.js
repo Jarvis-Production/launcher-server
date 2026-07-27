@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const { db, hashHWID } = require('./db');
+const { pool, one, clientIp } = require('./sbdb');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'jartix-secret-change-in-production';
 
@@ -82,28 +83,85 @@ router.post('/launcher/validate', auth, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Public key check - no auth required
+// Key check — used by TWO different callers:
+//
+//   launcher : {key, hwid}      -> full activation, binds the HWID
+//   in-game  : {hwid[, username]} -> re-validates the licence while playing
+//
+// The in-game client (Jartix.validateKey) sends no key and treats any non-200
+// as "invalid" — which disables every module — so the hwid/username-only form
+// must be answered here. It scans the body for "valid":true / "active":true /
+// "status":"ok", so those markers are part of the success payload.
 router.post('/launcher/check', async (req, res) => {
     try {
-        const { key, hwid } = req.body;
-        if (!key || !hwid) return res.status(400).json({ error: 'Key and HWID required' });
-        const keyRow = await db.prepare('SELECT * FROM keys WHERE key_code = ?').get(key);
-        if (!keyRow) return res.status(404).json({ error: 'Key not found' });
-        if (!keyRow.active) return res.status(403).json({ error: 'Key deactivated' });
-        // Check expiration
-        if (keyRow.expires_at) {
-            const now = new Date();
-            const expires = new Date(keyRow.expires_at + 'Z');
-            if (now > expires) return res.status(403).json({ error: 'Key expired' });
+        const { key, hwid, username } = req.body || {};
+        if (!key && !hwid && !username)
+            return res.status(400).json({ valid: false, error: 'Key or HWID required' });
+
+        let p = null;
+        if (key) {
+            p = await one('SELECT * FROM profiles WHERE license_key = $1', [String(key).trim()]);
+            if (!p) return res.status(404).json({ valid: false, error: 'Key not found' });
+        } else {
+            // in-game path: match by the launcher-provided login, else by HWID
+            if (username)
+                p = await one('SELECT * FROM profiles WHERE username = $1', [String(username).trim()]);
+            if (!p && hwid)
+                p = await one('SELECT * FROM profiles WHERE hwid = $1 OR hwid = $2 LIMIT 1',
+                              [hashHWID(hwid), String(hwid)]);
+            if (!p) return res.status(403).json({ valid: false, error: 'Not registered' });
         }
-        const hashedHWID = hashHWID(hwid);
-        const sessionId = uuidv4();
-        const sessionToken = crypto.randomBytes(32).toString('hex');
-        await db.prepare('INSERT INTO sessions (id, user_id, hwid, ip, token) VALUES (?, ?, ?, ?, ?)').run(sessionId, keyRow.user_id || null, hashedHWID, req.ip, sessionToken);
-        await db.prepare('INSERT INTO logs (event, hwid, ip, details) VALUES (?, ?, ?, ?)').run('check', hashedHWID, req.ip, key);
-        const displayName = keyRow.key_type === 'admin' ? 'J.P' : 'Player' + Math.floor(Math.random() * 9000 + 1000);
-        res.json({ success: true, token: sessionToken, username: displayName, keyType: keyRow.key_type });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+
+        if (p.banned)          return res.status(403).json({ valid: false, error: 'Account banned' });
+        if (!p.active)         return res.status(403).json({ valid: false, error: 'Key deactivated' });
+        if (!p.license_active) return res.status(403).json({ valid: false, error: 'No active license' });
+        if (p.expires_at && new Date(p.expires_at) < new Date())
+            return res.status(403).json({ valid: false, error: 'License expired' });
+
+        const ip = clientIp(req);
+        const hashedHWID = hwid ? hashHWID(hwid) : null;
+
+        if (key) {
+            // launcher: enforce and (first time) record the HWID binding
+            if (p.hwid && hashedHWID && p.hwid !== hashedHWID)
+                return res.status(403).json({ valid: false, error: 'HWID mismatch — reset it in the panel' });
+            await pool.query(
+                'UPDATE profiles SET hwid = COALESCE(hwid, $1), last_login = now(), last_ip = $2 WHERE id = $3',
+                [hashedHWID, ip, p.id]
+            );
+            await pool.query(
+                'INSERT INTO activity_logs (event, username, hwid, ip, details) VALUES ($1,$2,$3,$4,$5)',
+                ['check', p.username, hashedHWID, ip, 'launcher login']
+            );
+        }
+
+        const token = crypto.randomBytes(32).toString('hex');
+        res.json({
+            success: true, valid: true, active: true, status: 'ok',
+            token, username: p.username, keyType: p.key_type, expires: p.expires_at
+        });
+    } catch (e) { console.error('[check]', e.message); res.status(500).json({ error: e.message }); }
+});
+
+// Telemetry ingest — the in-game cheat reports which server the player joined.
+router.post('/telemetry', async (req, res) => {
+    try {
+        const { hwid, server, ip, brand, version, timestamp } = req.body || {};
+        if (!hwid) return res.sendStatus(400);
+        // best-effort: attach the username by matching the stored (hashed) HWID
+        let username = null;
+        try {
+            const m = await one('SELECT username FROM profiles WHERE hwid = $1 OR hwid = $2 LIMIT 1',
+                [hwid, hashHWID(hwid)]);
+            username = m ? m.username : null;
+        } catch {}
+        await pool.query(
+            `INSERT INTO telemetry_logs (hwid, username, server, ip, brand, version, event, timestamp)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [hwid, username, server || '', ip || '', brand || '', version || '', 'server', timestamp || Date.now()]
+        );
+        res.sendStatus(200);
+    } catch (e) { console.error('[telemetry]', e.message); res.sendStatus(500); }
 });
 
 router.get('/launcher/client', async (req, res) => {
@@ -137,18 +195,6 @@ router.get('/launcher/version', async (req, res) => {
 
 router.get('/launcher/config', async (req, res) => {
     res.json({ encryptionKey: process.env.ENCRYPTION_KEY || '' });
-});
-
-// Telemetry — client sends data on server join (no auth)
-router.post('/telemetry', async (req, res) => {
-    try {
-        const { hwid, username, server, ip, brand, version, timestamp } = req.body;
-        if (!hwid) return res.status(400).json({ error: 'hwid required' });
-        await db.prepare('INSERT INTO telemetry (hwid, username, server, ip, brand, version, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-            hwid, username || '', server || '', ip || '', brand || '', version || '', timestamp || Date.now()
-        );
-        res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;
