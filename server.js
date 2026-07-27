@@ -180,24 +180,21 @@ const screenViewers = new Set();
 
 screenWss.on('connection', (ws, req) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    const role = url.searchParams.get('role'); // 'client' or 'admin'
+    const role = url.searchParams.get('role');
     const username = url.searchParams.get('user') || 'unknown';
 
     if (role === 'admin') {
         screenViewers.add(ws);
         ws.on('close', () => screenViewers.delete(ws));
         ws.on('message', (data) => {
-            // Admin requests to watch specific user
             try {
                 const msg = JSON.parse(data);
                 if (msg.type === 'watch') ws.watchUser = msg.user;
             } catch {}
         });
     } else {
-        // Client sending frames
         ws.on('message', (data) => {
             screenFrames.set(username, { frame: data, time: Date.now() });
-            // Forward to watching admins
             screenViewers.forEach(admin => {
                 if (admin.watchUser === username && admin.readyState === WebSocket.OPEN) {
                     admin.send(data);
@@ -210,7 +207,7 @@ screenWss.on('connection', (ws, req) => {
     }
 });
 
-// Upgrade WebSocket connections on /ws/screen path
+// Upgrade WebSocket connections
 server.on('upgrade', (request, socket, head) => {
     const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
     if (pathname === '/ws/screen') {
@@ -218,6 +215,7 @@ server.on('upgrade', (request, socket, head) => {
             screenWss.emit('connection', ws, request);
         });
     }
+    // /ws/loader is handled by LoaderServer automatically
 });
 
 // API: get list of users with active screen streams

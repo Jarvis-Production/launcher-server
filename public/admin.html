@@ -30,6 +30,7 @@ input,select{font-family:inherit}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes slideIn{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:none}}
 @keyframes glow{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes enchGlow{0%,100%{box-shadow:0 0 8px #8b5cf644,inset 0 0 12px #06b6d422}50%{box-shadow:0 0 16px #8b5cf688,inset 0 0 20px #06b6d444}}
 
 /* ---------- login ---------- */
 #login{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
@@ -413,21 +414,20 @@ async function detailModal(id){closeMenus();
 /* ---------- inventory items ---------- */
 function getItemIcon(id) {
   if(!id) return '';
-  // Convert minecraft:item_id to sprite URL
-  const name = id.replace('minecraft:', '');
-  return `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.21/assets/minecraft/textures/item/${name}.png`;
+  const name = id.replace('minecraft:', '').replace(/\//g, '_');
+  // Try multiple CDN sources for compatibility
+  return `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/1.21/assets/minecraft/textures/item/${name}.png`;
 }
 
 function getItemDisplayName(item) {
   if(!item) return '?';
-  // Use real name if available, otherwise format ID
-  if(item.name) return item.name;
+  if(item.name) return item.name; // Real name from game (Russian if game is Russian)
   const id = (item.id || '').replace('minecraft:', '').replace(/_/g, ' ');
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
 
 function isEnchanted(item) {
-  return item && item.ench && item.ench.length > 0;
+  return item && (item.ench === true || (Array.isArray(item.ench) && item.ench.length > 0));
 }
 
 function renderSlot(item, large) {
@@ -441,11 +441,12 @@ function renderSlot(item, large) {
   const count = item.c > 1 ? item.c : '';
   const iconUrl = getItemIcon(item.id);
   
-  // Enchantment glint styles
+  // Enchantment glint
   const enchStyle = isEnch ? `
     background: linear-gradient(135deg, #8b5cf655, #06b6d455, #8b5cf655);
     border-color: #8b5cf688;
     box-shadow: 0 0 8px #8b5cf644, inset 0 0 12px #06b6d422;
+    animation: enchGlow 2s ease-in-out infinite;
   ` : '';
   
   // Durability bar
@@ -456,10 +457,19 @@ function renderSlot(item, large) {
     durBar = `<div style="position:absolute;bottom:1px;left:2px;right:2px;height:2px;background:#333;border-radius:1px"><div style="height:100%;width:${pct*100}%;background:${color};border-radius:1px"></div></div>`;
   }
   
-  return `<div title="${esc(item.id)}\n${esc(name)}${item.d !== undefined ? '\nПрочность: '+(item.maxD-item.d)+'/'+item.maxD : ''}${isEnch ? '\nЗачаровано' : ''}" 
-    style="width:${size}px;height:${size}px;background:#1a1a2e;border:1px solid ${isEnch ? '#8b5cf688' : '#ffffff11'};border-radius:6px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:help;overflow:hidden;${enchStyle}">
-    <img src="${iconUrl}" style="width:${size-8}px;height:${size-8}px;image-rendering:pixelated" onerror="this.style.display='none';this.parentElement.querySelector('.item-fallback').style.display='flex'" />
-    <div class="item-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:${fontSize}px;color:var(--txt)">${esc(name.substring(0,6))}</div>
+  // Tooltip with full info
+  let tooltip = esc(item.id || '');
+  if(item.name) tooltip += '\\n' + esc(item.name);
+  if(item.c > 1) tooltip += '\\nКоличество: ' + item.c;
+  if(item.maxD && item.d !== undefined) tooltip += '\\nПрочность: ' + (item.maxD-item.d) + '/' + item.maxD;
+  if(isEnch) tooltip += '\\n✨ Зачаровано';
+  
+  return `<div title="${tooltip}" 
+    style="width:${size}px;height:${size}px;background:#1a1a2e;border:1px solid ${isEnch ? '#8b5cf688' : '#ffffff11'};border-radius:6px;position:relative;display:flex;align-items:center;justify-content:center;cursor:help;overflow:hidden;${enchStyle}">
+    <img src="${iconUrl}" style="width:${size-8}px;height:${size-8}px;image-rendering:pixelated" 
+      onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" 
+      onload="this.nextElementSibling.style.display='none'" />
+    <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:${fontSize}px;color:var(--txt);text-align:center;padding:2px">${esc(name.substring(0,8))}</div>
     ${count ? `<div style="position:absolute;bottom:1px;right:3px;font-size:9px;color:#fff;font-weight:700;text-shadow:1px 1px 2px #000">${count}</div>` : ''}
     ${durBar}
     ${isEnch ? '<div style="position:absolute;top:1px;right:3px;font-size:8px">✨</div>' : ''}
@@ -614,19 +624,7 @@ function showInventoryModal(username, btn){
   });
 }
 
-function renderSlot(item, slotNum) {
-  if(!item) return `<div style="width:44px;height:44px;background:#11111844;border:1px solid #ffffff08;border-radius:6px;position:relative"></div>`;
-  
-  const color = getItemColor(item.id);
-  const name = shortName(item.id);
-  const count = item.c > 1 ? item.c : '';
-  
-  return `<div title="${esc(item.id)} x${item.c}${item.d ? ' (урон: '+item.d+')' : ''}" style="width:44px;height:44px;background:${color}15;border:1px solid ${color}44;border-radius:6px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:help">
-    <div style="font-size:9px;color:${color};text-align:center;line-height:1.1;max-width:40px;overflow:hidden">${esc(name.substring(0,8))}</div>
-    ${count ? `<div style="position:absolute;bottom:2px;right:3px;font-size:9px;color:var(--txt);font-weight:700">${count}</div>` : ''}
-    ${item.d !== undefined ? `<div style="position:absolute;top:1px;right:3px;font-size:7px;color:#f55">${item.d}</div>` : ''}
-  </div>`;
-}
+
 
 async function fetchInventory(username) {
   try {
