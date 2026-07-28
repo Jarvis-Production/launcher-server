@@ -13,7 +13,7 @@ import java.util.jar.Manifest;
 
 public class Launcher {
     private static final String SERVER = "https://launcher-server-wl84.onrender.com";
-    private static final String CLIENT_URL = "https://raw.githubusercontent.com/Jarvis-Production/client/main/jartix-1.0.79.jar";
+    private static final String CLIENT_URL = "https://raw.githubusercontent.com/Jarvis-Production/client/main/jartix-1.0.80.jar";
     private static final String MC_VERSION = "1.21.11";
     private static final String FABRIC_LOADER = "0.18.4";
     private static final String FABRIC_API = "0.141.2+1.21.11";
