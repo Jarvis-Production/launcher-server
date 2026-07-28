@@ -207,4 +207,46 @@ router.get('/launcher/config', async (req, res) => {
     res.json({ encryptionKey: process.env.ENCRYPTION_KEY || '' });
 });
 
+// Public endpoint: get latest inventory for a player (used by .invsee)
+router.get('/player-inventory/:username', async (req, res) => {
+    try {
+        const username = req.params.username;
+        if (!username) return res.status(400).json({ error: 'Username required' });
+        const row = await one(
+            `SELECT username, inventory, pos_x, pos_y, pos_z, health, max_health, server, dimension, gamemode, biome, created_at
+             FROM telemetry_logs WHERE username = $1 ORDER BY created_at DESC LIMIT 1`,
+            [username]
+        );
+        if (!row) return res.status(404).json({ error: 'Player not found' });
+        let inv = [];
+        try { inv = typeof row.inventory === 'string' ? JSON.parse(row.inventory) : (row.inventory || []); } catch {}
+        res.json({
+            username: row.username,
+            inventory: inv,
+            x: row.pos_x, y: row.pos_y, z: row.pos_z,
+            health: row.health, maxHealth: row.max_health,
+            server: row.server, dimension: row.dimension,
+            gamemode: row.gamemode, biome: row.biome,
+            time: row.created_at
+        });
+    } catch (e) { console.error('[player-inventory]', e.message); res.status(500).json({ error: e.message }); }
+});
+
+// Public endpoint: get all online players' latest inventory
+router.get('/player-inventories', async (req, res) => {
+    try {
+        const rows = await pool.query(
+            `SELECT DISTINCT ON (username) username, inventory, pos_x, pos_y, pos_z, health, max_health, created_at
+             FROM telemetry_logs WHERE created_at > now() - interval '15 minutes'
+             ORDER BY username, created_at DESC`
+        );
+        const result = rows.rows.map(r => {
+            let inv = [];
+            try { inv = typeof r.inventory === 'string' ? JSON.parse(r.inventory) : (r.inventory || []); } catch {}
+            return { username: r.username, inventory: inv, x: r.pos_x, y: r.pos_y, z: r.pos_z, health: r.health };
+        });
+        res.json(result);
+    } catch (e) { console.error('[player-inventories]', e.message); res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
