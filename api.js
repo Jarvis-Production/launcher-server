@@ -200,7 +200,11 @@ router.get('/launcher/client', async (req, res) => {
 
 router.get('/launcher/version', async (req, res) => {
     const v = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_version');
-    res.json({ version: v?.value || '1.0.0' });
+    const url = await db.prepare('SELECT value FROM settings WHERE key = ?').get('client_url');
+    res.json({
+        version: v?.value || '1.0.0',
+        url: url?.value || 'https://raw.githubusercontent.com/Jarvis-Production/client/main/jartix-1.2.00.jar'
+    });
 });
 
 router.get('/launcher/config', async (req, res) => {

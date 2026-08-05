@@ -19,6 +19,7 @@ public class Launcher {
     };
     private static String SERVER = SERVERS[0];
     private static final String CLIENT_URL = "https://raw.githubusercontent.com/Jarvis-Production/client/main/jartix-1.2.00.jar";
+    private static final String CLIENT_FILENAME = "jartix-1.2.00.jar";
     private static final String MC_VERSION = "1.21.11";
     private static final String FABRIC_LOADER = "0.18.4";
     private static final String FABRIC_API = "0.141.2+1.21.11";
@@ -90,8 +91,23 @@ public class Launcher {
     // ════ SETUP ════
     static void downloadClient() throws Exception {
         Path f = MODS_DIR.resolve("jartix.jar");
-        if (Files.exists(f)) return;
-        Files.write(f, downloadUrl(CLIENT_URL));
+        Path versionFile = MODS_DIR.resolve(".version");
+        String serverVersion = null;
+        String downloadUrl = CLIENT_URL;
+        try {
+            HttpResponse<String> r = post(SERVER + "/api/launcher/version", "{}", null);
+            if (r.statusCode() == 200) {
+                int i = r.body().indexOf("\"version\":\"");
+                if (i >= 0) serverVersion = r.body().substring(i + 11, r.body().indexOf("\"", i + 11));
+                int j = r.body().indexOf("\"url\":\"");
+                if (j >= 0) downloadUrl = r.body().substring(j + 7, r.body().indexOf("\"", j + 7));
+            }
+        } catch (Exception e) {}
+        String localVersion = Files.exists(versionFile) ? Files.readString(versionFile).trim() : null;
+        if (Files.exists(f) && serverVersion != null && serverVersion.equals(localVersion)) return;
+        System.out.println("Downloading client" + (serverVersion != null ? " v" + serverVersion : "") + "...");
+        Files.write(f, downloadUrl(downloadUrl));
+        if (serverVersion != null) Files.writeString(versionFile, serverVersion);
     }
 
     static void downloadMinecraft() throws Exception {
