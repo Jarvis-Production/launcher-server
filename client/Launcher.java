@@ -14,8 +14,8 @@ import java.util.jar.Manifest;
 
 public class Launcher {
     private static final String[] SERVERS = {
-        "https://launcher-server-wl84.onrender.com",
-        "https://jartix-proxy.cf7.workers.dev"
+        "https://fragrant-sun-aa47.tomarovmaksim066.workers.dev",
+        "https://launcher-server-wl84.onrender.com"
     };
     private static String SERVER = SERVERS[0];
     private static final String CLIENT_URL = "https://raw.githubusercontent.com/Jarvis-Production/client/main/jartix-1.2.00.jar";
