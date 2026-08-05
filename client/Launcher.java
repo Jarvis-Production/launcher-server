@@ -13,7 +13,11 @@ import java.util.*;
 import java.util.jar.Manifest;
 
 public class Launcher {
-    private static final String SERVER = "https://launcher-server-wl84.onrender.com";
+    private static final String[] SERVERS = {
+        "https://launcher-server-wl84.onrender.com",
+        "https://jartix-proxy.cf7.workers.dev"
+    };
+    private static String SERVER = SERVERS[0];
     private static final String CLIENT_URL = "https://raw.githubusercontent.com/Jarvis-Production/client/main/jartix-1.2.00.jar";
     private static final String MC_VERSION = "1.21.11";
     private static final String FABRIC_LOADER = "0.18.4";
@@ -31,11 +35,11 @@ public class Launcher {
 
     public static void main(String[] args) throws Exception {
         System.out.println("Connecting to server...");
-        if (!testServerWithRetry()) {
+        if (!pickServer()) {
             System.out.println("ERROR: Cannot reach server. Try VPN or check your internet connection.");
-            System.out.println("Server: " + SERVER);
             waitAndExit(); return;
         }
+        System.out.println("Using server: " + SERVER);
 
         Scanner sc = new Scanner(System.in);
         System.out.print("Login: ");
@@ -73,12 +77,12 @@ public class Launcher {
         } catch (Exception e) { return false; }
     }
 
-    static boolean testServerWithRetry() {
-        for (int i = 1; i <= 3; i++) {
-            System.out.print("  Attempt " + i + "/3...");
+    static boolean pickServer() {
+        for (String url : SERVERS) {
+            SERVER = url;
+            System.out.print("  Trying " + url + "...");
             if (testServer()) { System.out.println(" OK"); return true; }
             System.out.println(" failed");
-            if (i < 3) { try { Thread.sleep(2000); } catch (Exception e) {} }
         }
         return false;
     }
