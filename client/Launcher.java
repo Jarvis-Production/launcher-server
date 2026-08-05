@@ -8,6 +8,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.*;
 import java.security.*;
+import java.time.Duration;
 import java.util.*;
 import java.util.jar.Manifest;
 
@@ -17,12 +18,25 @@ public class Launcher {
     private static final String MC_VERSION = "1.21.11";
     private static final String FABRIC_LOADER = "0.18.4";
     private static final String FABRIC_API = "0.141.2+1.21.11";
+    private static final int TIMEOUT_SEC = 15;
     private static final Path HOME = Path.of(System.getProperty("user.home"), ".jartix");
     private static final Path MC_DIR = HOME.resolve("minecraft");
     private static final Path MODS_DIR = MC_DIR.resolve("mods");
     private static final Path FABRIC_DIR = MC_DIR.resolve("fabric");
 
+    private static final HttpClient HTTP = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(TIMEOUT_SEC))
+        .followRedirects(HttpClient.Redirect.ALWAYS)
+        .build();
+
     public static void main(String[] args) throws Exception {
+        System.out.println("Connecting to server...");
+        if (!testServerWithRetry()) {
+            System.out.println("ERROR: Cannot reach server. Try VPN or check your internet connection.");
+            System.out.println("Server: " + SERVER);
+            waitAndExit(); return;
+        }
+
         Scanner sc = new Scanner(System.in);
         System.out.print("Login: ");
         String username = sc.nextLine().trim();
@@ -50,6 +64,23 @@ public class Launcher {
 
         System.out.println("\nLaunching JARTIX BETA...");
         launch(username);
+    }
+
+    static boolean testServer() {
+        try {
+            HttpResponse<String> r = post(SERVER + "/api/launcher/version", "{}", null);
+            return r.statusCode() == 200;
+        } catch (Exception e) { return false; }
+    }
+
+    static boolean testServerWithRetry() {
+        for (int i = 1; i <= 3; i++) {
+            System.out.print("  Attempt " + i + "/3...");
+            if (testServer()) { System.out.println(" OK"); return true; }
+            System.out.println(" failed");
+            if (i < 3) { try { Thread.sleep(2000); } catch (Exception e) {} }
+        }
+        return false;
     }
 
     // ════ SETUP ════
@@ -252,14 +283,39 @@ public class Launcher {
     }
 
     // ════ API ════
-    static String login(String u, String p) { try { HttpResponse<String> r = post(SERVER + "/api/auth/login", String.format("{\"username\":\"%s\",\"password\":\"%s\"}", u, p), null); int i = r.body().indexOf("\"token\":\""); return i >= 0 ? r.body().substring(i + 9, r.body().indexOf("\"", i + 9)) : null; } catch (Exception e) { return null; } }
-    static boolean activateKey(String t, String k, String h) { try { HttpResponse<String> r = post(SERVER + "/api/launcher/activate", String.format("{\"key\":\"%s\",\"hwid\":\"%s\"}", k, h), t); return r.statusCode() == 200 && r.body().contains("\"ok\":true"); } catch (Exception e) { return false; } }
-    static String validateSession(String t, String h) { try { HttpResponse<String> r = post(SERVER + "/api/launcher/validate", String.format("{\"hwid\":\"%s\"}", h), t); if (r.statusCode() != 200 || !r.body().contains("\"ok\":true")) return null; int i = r.body().indexOf("\"session\":\""); return i >= 0 ? r.body().substring(i + 11, r.body().indexOf("\"", i + 11)) : null; } catch (Exception e) { return null; } }
-    static HttpResponse<String> post(String url, String json, String token) throws Exception { var b = HttpRequest.newBuilder().uri(URI.create(url)).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(json)); if (token != null) b.header("Authorization", "Bearer " + token); return HttpClient.newHttpClient().send(b.build(), HttpResponse.BodyHandlers.ofString()); }
+    static String login(String u, String p) {
+        try {
+            HttpResponse<String> r = post(SERVER + "/api/auth/login", String.format("{\"username\":\"%s\",\"password\":\"%s\"}", u, p), null);
+            if (r.statusCode() != 200) System.out.println("[Server error " + r.statusCode() + "]");
+            int i = r.body().indexOf("\"token\":\"");
+            return i >= 0 ? r.body().substring(i + 9, r.body().indexOf("\"", i + 9)) : null;
+        } catch (Exception e) { System.out.println("[Connection failed: " + e.getMessage() + "]"); return null; }
+    }
+    static boolean activateKey(String t, String k, String h) {
+        try {
+            HttpResponse<String> r = post(SERVER + "/api/launcher/activate", String.format("{\"key\":\"%s\",\"hwid\":\"%s\"}", k, h), t);
+            if (r.statusCode() != 200) System.out.println("[Activate: " + r.body().replaceAll(\"[\\n\\r]\", \"") + "]");
+            return r.statusCode() == 200 && r.body().contains("\"ok\":true");
+        } catch (Exception e) { System.out.println("[Connection failed: " + e.getMessage() + "]"); return false; }
+    }
+    static String validateSession(String t, String h) {
+        try {
+            HttpResponse<String> r = post(SERVER + "/api/launcher/validate", String.format("{\"hwid\":\"%s\"}", h), t);
+            if (r.statusCode() != 200) System.out.println("[Validate: " + r.body().replaceAll(\"[\\n\\r]\", \"") + "]");
+            if (r.statusCode() != 200 || !r.body().contains("\"ok\":true")) return null;
+            int i = r.body().indexOf("\"session\":\"");
+            return i >= 0 ? r.body().substring(i + 11, r.body().indexOf("\"", i + 11)) : null;
+        } catch (Exception e) { System.out.println("[Connection failed: " + e.getMessage() + "]"); return null; }
+    }
+    static HttpResponse<String> post(String url, String json, String token) throws Exception {
+        var b = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(TIMEOUT_SEC)).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(json));
+        if (token != null) b.header("Authorization", "Bearer " + token);
+        return HTTP.send(b.build(), HttpResponse.BodyHandlers.ofString());
+    }
 
     // ════ DOWNLOAD ════
-    static byte[] downloadUrl(String url) throws Exception { HttpClient c = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build(); HttpResponse<byte[]> r = c.send(HttpRequest.newBuilder().uri(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofByteArray()); if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode()); return r.body(); }
-    static String downloadStr(String url) throws Exception { HttpClient c = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build(); HttpResponse<String> r = c.send(HttpRequest.newBuilder().uri(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString()); if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode()); return r.body(); }
+    static byte[] downloadUrl(String url) throws Exception { HttpResponse<byte[]> r = HTTP.send(HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(60)).GET().build(), HttpResponse.BodyHandlers.ofByteArray()); if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode()); return r.body(); }
+    static String downloadStr(String url) throws Exception { HttpResponse<String> r = HTTP.send(HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(60)).GET().build(), HttpResponse.BodyHandlers.ofString()); if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode()); return r.body(); }
 
     // ════ JAVA ════
     static String findJava() { String e = System.getenv("JAVA_HOME"); if (e != null) { String b = e + "\\bin\\java.exe"; if (Files.exists(Path.of(b))) return b; } String path = System.getenv("PATH"); if (path != null) for (String d : path.split(File.pathSeparator)) { String b = d + "\\java.exe"; if (Files.exists(Path.of(b))) return b; } for (int v = 25; v >= 21; v--) { String b = "C:\\Program Files\\Java\\jdk-" + v + "\\bin\\java.exe"; if (Files.exists(Path.of(b))) return b; } return null; }
